@@ -19,6 +19,8 @@ export function loadGameSave(): SaveData {
       unlockedAchievements: Array.isArray(parsed.unlockedAchievements)
         ? parsed.unlockedAchievements
         : [],
+      campaignUnlocked: typeof parsed.campaignUnlocked === 'number' ? parsed.campaignUnlocked : 0,
+      campaignStars: Array.isArray(parsed.campaignStars) ? parsed.campaignStars : [],
     };
   } catch {
     return { ...INITIAL_SAVE };

@@ -1,7 +1,14 @@
 import React from 'react';
-import { Bomb, Hourglass, Magnet, Music, Pause, Shield, Target, Timer, Volume2, VolumeX, Zap } from 'lucide-react';
+import { Bomb, Hourglass, Magnet, Music, Pause, Radio, Shield, Skull, Target, Timer, Volume2, VolumeX, Zap } from 'lucide-react';
+import { LevelDef, SPEAKERS, SpeakerId } from '../game/campaign';
 import { GameMode, QuestDef } from '../types/game';
 import { ShardIcon } from './Icon';
+
+export interface CommMessage {
+  id: number;
+  who: SpeakerId;
+  text: string;
+}
 
 interface HUDProps {
   score: number;
@@ -20,7 +27,12 @@ interface HUDProps {
   dashCooldown: number;
   dashMaxCooldown: number;
   bossHp: number;
-  bossLevel: number;
+  bossName: string;
+  bossStatus: string;
+  /** 0..1 while flying through a campaign sector, -1 otherwise. */
+  stageProgress: number;
+  level: LevelDef | null;
+  comm: CommMessage | null;
   currentQuest: QuestDef;
   questProgress: number;
   centerBannerText: string;
@@ -68,7 +80,11 @@ export const HUD: React.FC<HUDProps> = ({
   dashCooldown,
   dashMaxCooldown,
   bossHp,
-  bossLevel,
+  bossName,
+  bossStatus,
+  stageProgress,
+  level,
+  comm,
   currentQuest,
   questProgress,
   centerBannerText,
@@ -126,7 +142,9 @@ export const HUD: React.FC<HUDProps> = ({
                 <ShardIcon size={12} />
                 {shards.toLocaleString('en-US')}
               </span>
-              <span className="text-slate-400 text-[11px] font-bold font-cyber tracking-wider">LV {waveLevel}</span>
+              <span className="text-slate-400 text-[11px] font-bold font-cyber tracking-wider">
+                {level ? level.code : `LV ${waveLevel}`}
+              </span>
               {gameMode === 'timed' && (
                 <span
                   className={`flex items-center gap-1 text-[11px] font-bold font-cyber tabular-nums ${
@@ -204,12 +222,32 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
         )}
 
+        {/* Campaign: distance to the sector's Warden */}
+        {level && stageProgress >= 0 && (
+          <div className="mt-2.5">
+            <div className="flex justify-between items-end mb-1">
+              <span className="text-[10px] font-bold font-cyber tracking-[0.18em] uppercase" style={{ color: level.accent }}>
+                {level.name}
+              </span>
+              <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                <Skull size={10} /> {level.bossName}
+              </span>
+            </div>
+            <div className="relative h-1.5 rounded-full bg-slate-950/90 border border-slate-700/80 overflow-hidden">
+              <div
+                className="h-full rounded-full transition-[width] duration-200"
+                style={{ width: `${stageProgress * 100}%`, background: `linear-gradient(90deg, #22d3ee, ${level.accent})` }}
+              />
+            </div>
+          </div>
+        )}
+
         {/* Boss HP bar */}
         {bossHp >= 0 && (
           <div className="mt-3 anim-drop">
             <div className="flex justify-between items-end mb-1">
               <span className="text-[11px] font-black font-cyber tracking-[0.2em] text-rose-300 neon-glow-pink">
-                SENTINEL MK-{bossLevel}
+                {bossName}
               </span>
               <span className="text-[10px] font-bold text-rose-200/80 tabular-nums">{Math.ceil(bossHp * 100)}%</span>
             </div>
@@ -218,6 +256,29 @@ export const HUD: React.FC<HUDProps> = ({
                 className="h-full rounded-full bg-gradient-to-r from-rose-500 via-fuchsia-500 to-pink-400 transition-[width] duration-150"
                 style={{ width: `${bossHp * 100}%` }}
               />
+            </div>
+            {bossStatus && (
+              <p className="mt-1 text-[10px] sm:text-[11px] font-bold text-amber-200/90 tracking-wide text-center leading-tight">
+                {bossStatus}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Radio chatter */}
+        {comm && (
+          <div key={comm.id} className="mt-2 mx-auto max-w-sm anim-drop">
+            <div
+              className="flex items-start gap-2 px-3 py-2 rounded-xl bg-slate-950/80 border backdrop-blur-sm"
+              style={{ borderColor: `${SPEAKERS[comm.who].color}66` }}
+            >
+              <Radio size={13} className="mt-0.5 shrink-0" style={{ color: SPEAKERS[comm.who].color }} />
+              <p className="text-xs leading-snug text-slate-100">
+                <span className="font-black font-cyber text-[10px] tracking-wider mr-1.5" style={{ color: SPEAKERS[comm.who].color }}>
+                  {SPEAKERS[comm.who].name}
+                </span>
+                {comm.text}
+              </p>
             </div>
           </div>
         )}

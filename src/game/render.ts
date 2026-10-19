@@ -6,6 +6,7 @@ import {
   PowerupEntity,
   StarEntity,
 } from '../types/game';
+import type { LevelTheme } from './campaign';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -183,12 +184,16 @@ export function drawBackground(
   stars: StarEntity[],
   fever: boolean,
   boss: boolean,
-  warp: number
+  warp: number,
+  theme?: LevelTheme
 ) {
   const bg = ctx.createLinearGradient(0, 0, 0, H);
   if (fever) {
     bg.addColorStop(0, '#1f0726');
     bg.addColorStop(1, '#0a0418');
+  } else if (theme) {
+    bg.addColorStop(0, theme.top);
+    bg.addColorStop(1, theme.bottom);
   } else if (boss) {
     bg.addColorStop(0, '#1a0410');
     bg.addColorStop(1, '#070514');
@@ -201,16 +206,16 @@ export function drawBackground(
 
   // Drifting nebula clouds
   const big = Math.max(W, H);
-  for (const n of NEBULAE) {
+  NEBULAE.forEach((n, i) => {
     const span = H + big * n.r * 2;
     const y = ((n.y * H + t * n.speed) % span) - big * n.r;
     const x = n.x * W + Math.sin(t * 0.07 + n.speed) * 40;
-    const col = fever ? '#f43f5e' : boss ? '#be123c' : n.color;
+    const col = fever ? '#f43f5e' : theme ? theme.nebula[i] : boss ? '#be123c' : n.color;
     drawGlow(ctx, x, y, big * n.r, col, 0.22);
-  }
+  });
 
   // Grid floor, fading towards the top
-  const gridColor = fever ? '#f43f5e' : boss ? '#fb7185' : '#22d3ee';
+  const gridColor = fever ? '#f43f5e' : theme ? theme.grid : boss ? '#fb7185' : '#22d3ee';
   const gridGrad = ctx.createLinearGradient(0, 0, 0, H);
   gridGrad.addColorStop(0, hexToRgba(gridColor, 0));
   gridGrad.addColorStop(0.55, hexToRgba(gridColor, fever ? 0.1 : 0.05));
@@ -269,6 +274,17 @@ export function drawVignette(ctx: Ctx, W: number, H: number) {
     vignetteKey = key;
   }
   ctx.drawImage(vignetteCanvas, 0, 0, W, H);
+}
+
+/** Darkness everywhere except a pool of light around the pilot (Ghost Net). */
+export function drawFog(ctx: Ctx, W: number, H: number, px: number, py: number, radius: number, t: number) {
+  const r = radius * (1 + Math.sin(t * 2) * 0.03);
+  const g = ctx.createRadialGradient(px, py, r * 0.35, px, py, r);
+  g.addColorStop(0, 'rgba(3, 1, 12, 0)');
+  g.addColorStop(1, 'rgba(3, 1, 12, 0.8)');
+  ctx.fillStyle = g;
+  // Overscan so screen shake never reveals an unfogged edge
+  ctx.fillRect(-60, -60, W + 120, H + 120);
 }
 
 // ---------------------------------------------------------------------------
@@ -331,6 +347,15 @@ function drawPowerGlyph(ctx: Ctx, kind: PowerupEntity['kind'], s: number) {
     ctx.lineTo(s * 0.6, s * 0.85);
     ctx.closePath();
     ctx.stroke();
+  } else if (kind === 'key') {
+    ctx.arc(0, -s * 0.45, s * 0.42, 0, Math.PI * 2);
+    ctx.moveTo(0, -s * 0.03);
+    ctx.lineTo(0, s);
+    ctx.moveTo(0, s * 0.55);
+    ctx.lineTo(s * 0.4, s * 0.55);
+    ctx.moveTo(0, s * 0.85);
+    ctx.lineTo(s * 0.3, s * 0.85);
+    ctx.stroke();
   } else {
     ctx.arc(-s * 0.1, s * 0.15, s * 0.62, 0, Math.PI * 2);
     ctx.fill();
@@ -345,6 +370,8 @@ export function drawPowerup(ctx: Ctx, p: PowerupEntity, t: number) {
   const pulse = 1 + Math.sin(p.pulse) * 0.08;
   drawGlow(ctx, p.x, p.y, p.r * 3.2, p.color, 0.7);
   ctx.save();
+  // Still arming: shown faded so it reads as "not yet"
+  if (p.armTime && p.armTime > 0) ctx.globalAlpha = 0.35 + Math.sin(t * 20) * 0.15;
   ctx.translate(p.x, p.y);
   ctx.scale(pulse, pulse);
 
@@ -383,11 +410,53 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
   const flash = (h.hitFlash || 0) > 0;
 
   if (h.type === 'shot') {
-    drawGlow(ctx, h.x, h.y, h.r * 3.2, h.color, 0.9);
-    ctx.fillStyle = '#ffffff';
+    // Ghost shots fade almost out of sight, then flare back
+    const a = h.ghost ? 0.12 + 0.88 * Math.abs(Math.sin(t * 2.6 + h.id * 0.7)) : 1;
+    drawGlow(ctx, h.x, h.y, h.r * 3.2, h.color, 0.9 * a);
+    ctx.fillStyle = h.ghost ? `rgba(255,255,255,${a})` : '#ffffff';
     ctx.beginPath();
     ctx.arc(h.x, h.y, h.r * 0.55, 0, Math.PI * 2);
     ctx.fill();
+    if (h.glitch !== undefined) {
+      ctx.strokeStyle = hexToRgba(h.color, 0.8);
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(h.x - h.r, h.y - h.r, h.r * 2, h.r * 2);
+    }
+    return;
+  }
+
+  if (h.type === 'orb') {
+    // Plasma core: big, slow, deflectable
+    const fuse = h.fuse ?? 5;
+    const urgent = !h.reflected && fuse < 1.5 && Math.sin(t * 30) > 0;
+    const col = h.reflected ? '#22d3ee' : h.color;
+    drawGlow(ctx, h.x, h.y, h.r * 3.4, col, 0.85);
+    ctx.save();
+    ctx.translate(h.x, h.y);
+    const g = ctx.createRadialGradient(0, 0, 2, 0, 0, h.r);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.45, urgent ? '#ffffff' : h.reflected ? '#67e8f9' : '#fde047');
+    g.addColorStop(1, col);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, h.r * (1 + Math.sin(t * 12) * 0.06), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.rotate(t * 4);
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    ctx.arc(0, 0, h.r + 7, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    if (!h.reflected) {
+      ctx.save();
+      ctx.font = "800 9px 'Orbitron', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fef3c7';
+      ctx.fillText('DASH!', h.x, h.y + h.r + 16);
+      ctx.restore();
+    }
     return;
   }
 
@@ -539,7 +608,17 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
   ctx.restore();
 }
 
-export function drawLaser(ctx: Ctx, l: LaserEntity, H: number, t: number) {
+export function drawLaser(ctx: Ctx, l: LaserEntity, W: number, H: number, t: number) {
+  if (l.orient === 'h') {
+    // Rotated frame: local (u, v) -> screen (v, row - u), so a column at u = 0
+    // with length W becomes the full-width row centred on l.x
+    ctx.save();
+    ctx.translate(0, l.x);
+    ctx.rotate(-Math.PI / 2);
+    drawLaser(ctx, { ...l, orient: 'v', x: 0 }, H, W, t);
+    ctx.restore();
+    return;
+  }
   const half = l.width / 2;
   if (l.warnTime > 0) {
     // Telegraph: flashing danger column

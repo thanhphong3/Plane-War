@@ -188,10 +188,34 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   {
     id: 'boss_hunter',
     title: 'Core Breaker',
-    desc: 'Destroy 5 Sentinel bosses in total.',
+    desc: 'Destroy 5 bosses in total.',
     icon: 'crown',
     rewardShards: 300,
     isEligible: (s) => s.totalBossKills >= 5,
+  },
+  {
+    id: 'campaign_half',
+    title: 'Halfway Home',
+    desc: 'Clear Sector 03 of the Gridfall campaign.',
+    icon: 'rocket',
+    rewardShards: 200,
+    isEligible: (s) => s.campaignUnlocked >= 3,
+  },
+  {
+    id: 'campaign_clear',
+    title: 'Grid Restored',
+    desc: 'Defeat NULL and finish the Gridfall campaign.',
+    icon: 'crown',
+    rewardShards: 500,
+    isEligible: (s) => (s.campaignStars[5] || 0) > 0,
+  },
+  {
+    id: 'campaign_perfect',
+    title: 'Flawless Pilot',
+    desc: 'Earn 3 stars on every campaign sector.',
+    icon: 'sparkles',
+    rewardShards: 800,
+    isEligible: (s) => s.campaignStars.filter((n) => n >= 3).length >= 6,
   },
 ];
 
@@ -226,4 +250,6 @@ export const INITIAL_SAVE: SaveData = {
   questIndex: 0,
   questProgress: 0,
   unlockedAchievements: [],
+  campaignUnlocked: 0,
+  campaignStars: [],
 };

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Flame, House, Play, Skull, Trophy, Waves, Wrench, Zap } from 'lucide-react';
+import { Flame, House, Play, RotateCcw, Skull, Trophy, Waves, Wrench, Zap } from 'lucide-react';
+import { LevelDef } from '../game/campaign';
 import { GameMode } from '../types/game';
 import { sound } from '../utils/audio';
 import { ShardIcon } from './Icon';
@@ -14,13 +15,17 @@ export interface GameOverStats {
   isNewRecord: boolean;
   previousBest: number;
   reason: 'crashed' | 'timeup';
+  /** Campaign: died during the Warden fight, so "retry from boss" is offered. */
+  reachedBoss: boolean;
 }
 
 interface GameOverModalProps {
   isOpen: boolean;
   stats: GameOverStats;
   gameMode: GameMode;
+  level: LevelDef | null;
   onPlayAgain: () => void;
+  onRetryBoss: () => void;
   onOpenShop: () => void;
   onMainMenu: () => void;
 }
@@ -29,6 +34,7 @@ const MODE_NAMES: Record<GameMode, string> = {
   endless: 'Endless',
   timed: 'Blitz 60s',
   hardcore: 'Hardcore',
+  campaign: 'Campaign',
 };
 
 const TIPS = [
@@ -63,13 +69,99 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   isOpen,
   stats,
   gameMode,
+  level,
   onPlayAgain,
+  onRetryBoss,
   onOpenShop,
   onMainMenu,
 }) => {
   const shown = useCountUp(stats.score, isOpen);
   if (!isOpen) return null;
-  const tip = TIPS[(stats.score + stats.wave + stats.nearMisses) % TIPS.length];
+  const tip =
+    level && stats.reachedBoss
+      ? level.intel[(stats.score + stats.nearMisses) % level.intel.length]
+      : TIPS[(stats.score + stats.wave + stats.nearMisses) % TIPS.length];
+
+  if (level) {
+    return (
+      <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-md anim-fade">
+        <div className="glass-panel w-full max-w-sm rounded-3xl p-5 sm:p-6 text-center flex flex-col anim-pop panel-glow-pink">
+          <p className="text-[10px] uppercase tracking-[0.3em] font-bold" style={{ color: level.accent }}>
+            {level.code} • {level.name}
+          </p>
+          <h2 className="text-2xl sm:text-3xl font-black text-white font-cyber uppercase neon-glow-pink mt-1">
+            Mission Failed
+          </h2>
+          <p className="text-xs text-slate-400 mt-1.5 italic">
+            {stats.reachedBoss ? `“${level.bossName} still holds the Root Key.”` : '“Signal lost. Rerouting you to the sector entrance.”'}
+          </p>
+
+          <div className="my-4 py-3 px-4 rounded-2xl bg-slate-900/85 border border-slate-800 grid grid-cols-3 gap-y-2">
+            <div>
+              <span className="block text-[10px] text-slate-500 uppercase tracking-wide">Score</span>
+              <span className="text-sm font-black text-cyan-200 tabular-nums">{shown.toLocaleString('en-US')}</span>
+            </div>
+            <div>
+              <span className="block text-[10px] text-slate-500 uppercase tracking-wide">Shards</span>
+              <span className="inline-flex items-center gap-1 text-sm font-black text-amber-300">
+                <ShardIcon size={12} />+{stats.shardsEarned}
+              </span>
+            </div>
+            <div>
+              <span className="block text-[10px] text-slate-500 uppercase tracking-wide">Best combo</span>
+              <span className="text-sm font-black text-fuchsia-300">x{stats.maxCombo}</span>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-300 mb-4 leading-snug">
+            <span className="font-bold" style={{ color: level.accent }}>
+              INTEL:
+            </span>{' '}
+            {tip}
+          </p>
+
+          <div className="space-y-2.5">
+            {stats.reachedBoss && (
+              <button
+                type="button"
+                onClick={() => {
+                  sound.playSound('click');
+                  onRetryBoss();
+                }}
+                className="w-full py-3.5 rounded-2xl btn-primary text-slate-950 font-black text-base uppercase font-cyber tracking-wider btn-cyber animate-glow flex items-center justify-center gap-2"
+              >
+                <Skull size={18} /> Retry Boss
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                sound.playSound('click');
+                onPlayAgain();
+              }}
+              className={`w-full rounded-2xl font-black uppercase font-cyber tracking-wider btn-cyber flex items-center justify-center gap-2 ${
+                stats.reachedBoss
+                  ? 'py-2.5 text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-100'
+                  : 'py-3.5 text-base btn-primary text-slate-950 animate-glow'
+              }`}
+            >
+              <RotateCcw size={stats.reachedBoss ? 14 : 18} /> Restart Sector
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                sound.playSound('click');
+                onMainMenu();
+              }}
+              className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-1.5 btn-cyber font-cyber"
+            >
+              <House size={14} /> Menu
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const cells = [
     { label: 'Shards', value: `+${stats.shardsEarned}`, icon: <ShardIcon size={13} />, color: 'text-amber-300' },

@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  BookOpen,
   ChevronRight,
   Flame,
   Hand,
@@ -8,6 +9,7 @@ import {
   Music,
   Play,
   Skull,
+  Star,
   Timer,
   Trophy,
   Volume2,
@@ -15,6 +17,7 @@ import {
   Wrench,
   Zap,
 } from 'lucide-react';
+import { LEVELS } from '../game/campaign';
 import { GameMode, SaveData, ShipDef } from '../types/game';
 import { SHIPS, UPGRADES, hasClaimableAchievement, upgradeCost } from '../utils/constants';
 import { sound } from '../utils/audio';
@@ -26,6 +29,7 @@ interface MainMenuProps {
   gameMode: GameMode;
   onSelectMode: (mode: GameMode) => void;
   onStartGame: () => void;
+  onOpenCampaign: () => void;
   onOpenShop: () => void;
   onOpenAchievements: () => void;
   isMuted: boolean;
@@ -58,6 +62,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   gameMode,
   onSelectMode,
   onStartGame,
+  onOpenCampaign,
   onOpenShop,
   onOpenAchievements,
   isMuted,
@@ -66,6 +71,9 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   onToggleBgm,
 }) => {
   const currentShip: ShipDef = SHIPS.find((s) => s.id === saveData.selectedShip) || SHIPS[0];
+  const campaignDone = (saveData.campaignStars[LEVELS.length - 1] || 0) > 0;
+  const nextSector = LEVELS[Math.min(LEVELS.length - 1, saveData.campaignUnlocked)];
+  const totalStars = saveData.campaignStars.reduce((s, n) => s + (n || 0), 0);
 
   const canAffordSomething =
     SHIPS.some((s) => !saveData.unlockedShips.includes(s.id) && saveData.shards >= s.cost) ||
@@ -146,9 +154,38 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           )}
         </button>
 
+        {/* Story campaign */}
+        <button
+          type="button"
+          onClick={() => {
+            sound.playSound('click');
+            onOpenCampaign();
+          }}
+          className="group mt-3 relative overflow-hidden flex items-center gap-3 p-3 rounded-2xl border-2 border-rose-400/50 bg-gradient-to-r from-rose-500/15 via-fuchsia-500/10 to-indigo-500/15 hover:border-rose-300 btn-cyber text-left shadow-lg shadow-rose-500/10"
+        >
+          <span className="w-11 h-11 shrink-0 rounded-xl bg-rose-500/20 border border-rose-400/50 flex items-center justify-center text-rose-200">
+            <BookOpen size={20} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] text-rose-300 uppercase tracking-[0.2em] font-cyber font-bold">Campaign</p>
+            <p className="text-base font-black text-white font-cyber leading-tight">GRIDFALL</p>
+            <p className="text-[11px] text-slate-300 truncate">
+              {campaignDone ? 'Grid restored. Replay for 3 stars' : `Next: ${nextSector.code} · ${nextSector.name}`}
+            </p>
+          </div>
+          <div className="flex flex-col items-end gap-0.5">
+            <span className="flex items-center gap-1 text-xs font-bold text-amber-300 tabular-nums">
+              <Star size={12} fill="currentColor" /> {totalStars}/{LEVELS.length * 3}
+            </span>
+            <span className="flex items-center gap-0.5 text-xs font-bold text-rose-200 group-hover:translate-x-0.5 transition-transform">
+              Play <ChevronRight size={14} />
+            </span>
+          </div>
+        </button>
+
         {/* Mode selector with personal bests */}
         <div className="mt-4">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 font-cyber">Game mode</p>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 font-cyber">Arcade modes</p>
           <div className="grid grid-cols-3 gap-2">
             {MODES.map((m) => {
               const active = gameMode === m.id;
@@ -262,7 +299,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           </div>
 
           <p className="text-center text-[10px] text-slate-500 mt-1">
-            Best combo x{saveData.bestCombo} • Sentinels destroyed {saveData.totalBossKills} • Runs {saveData.totalRuns}
+            Best combo x{saveData.bestCombo} • Bosses destroyed {saveData.totalBossKills} • Runs {saveData.totalRuns}
           </p>
         </div>
       </div>

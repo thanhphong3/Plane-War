@@ -14,7 +14,12 @@ export type SoundType =
   | 'boss_alarm'
   | 'boss_down'
   | 'enemy_shot'
-  | 'wave';
+  | 'wave'
+  | 'block'
+  | 'parry'
+  | 'key'
+  | 'glitch'
+  | 'comm';
 
 // A-minor synthwave progression: Am - F - C - G (one chord per bar)
 const BASS_ROOTS = [55, 43.65, 65.41, 49];
@@ -256,6 +261,37 @@ class SoundManager {
         case 'gameover':
           this.tone('sawtooth', 240, 40, now, 0.9, 0.24, out);
           this.noiseBurst(now, 0.8, 0.35, 'lowpass', 1800, out, 60);
+          break;
+
+        case 'block':
+          // Metallic "tink" when a shot glances off armour
+          this.tone('square', 1900, 1500, now, 0.04, 0.03, out);
+          this.tone('triangle', 2600, 2400, now, 0.05, 0.025, out);
+          break;
+
+        case 'parry':
+          this.tone('sawtooth', 300, 1400, now, 0.18, 0.18, out);
+          this.tone('sine', 1400, 2200, now + 0.05, 0.2, 0.12, out);
+          this.noiseBurst(now, 0.2, 0.18, 'bandpass', 3000, out, 7000);
+          break;
+
+        case 'key':
+          [659.25, 987.77, 1318.5, 1975.5].forEach((f, i) => {
+            this.tone('triangle', f, f, now + i * 0.06, 0.25, 0.12, out);
+          });
+          this.noiseBurst(now, 0.4, 0.08, 'highpass', 5000, out, 9000);
+          break;
+
+        case 'glitch':
+          for (let i = 0; i < 4; i++) {
+            const f = 200 + Math.random() * 1800;
+            this.tone('square', f, f * 0.5, now + i * 0.03, 0.03, 0.04, out);
+          }
+          break;
+
+        case 'comm':
+          this.tone('sine', 1320, 1320, now, 0.05, 0.05, out);
+          this.tone('sine', 1760, 1760, now + 0.07, 0.06, 0.05, out);
           break;
       }
     } catch {

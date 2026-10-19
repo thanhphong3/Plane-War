@@ -1,5 +1,7 @@
-export type GameMode = 'endless' | 'timed' | 'hardcore';
-export type GameState = 'MENU' | 'PLAYING' | 'PAUSED' | 'GAMEOVER';
+export type GameMode = 'endless' | 'timed' | 'hardcore' | 'campaign';
+export type GameState = 'MENU' | 'PLAYING' | 'PAUSED' | 'GAMEOVER' | 'STORY' | 'LEVELCLEAR';
+
+export type BossKind = 'sentinel' | 'gatekeeper' | 'twins' | 'furnace' | 'wraith' | 'singularity' | 'null';
 
 export interface ShipDef {
   id: string;
@@ -70,11 +72,16 @@ export interface SaveData {
   questIndex: number;
   questProgress: number;
   unlockedAchievements: string[];
+  /** Index of the highest campaign sector unlocked (0-based). */
+  campaignUnlocked: number;
+  /** Best star rating (0-3) per campaign sector. */
+  campaignStars: number[];
 }
 
 export interface HazardEntity {
   id: number;
-  type: 'drone' | 'seeker' | 'spinner' | 'turret' | 'shot';
+  /** 'orb' is a heavy plasma core that can be deflected with a Dash. */
+  type: 'drone' | 'seeker' | 'spinner' | 'turret' | 'shot' | 'orb';
   x: number;
   y: number;
   vx: number;
@@ -91,18 +98,48 @@ export interface HazardEntity {
   shotsLeft?: number;
   color: string;
   grazed: boolean;
+  /** Downward acceleration (falling embers). */
+  ay?: number;
+  /** Ghost shots fade in and out of sight. */
+  ghost?: boolean;
+  /** Glitch shots teleport forward every time this timer runs out. */
+  glitch?: number;
+  /** Orb: seconds until it detonates on its own. */
+  fuse?: number;
+  /** Orb: deflected back towards the boss by the player. */
+  reflected?: boolean;
 }
 
 export interface LaserEntity {
   id: number;
+  /** Column centre for vertical lasers, row centre for horizontal ones. */
   x: number;
   width: number;
   warnTime: number;
   fireTime: number;
   grazed: boolean;
+  orient?: 'v' | 'h';
+}
+
+/** A secondary body of a boss: twin, decoy, stabilizer node... */
+export interface BossPart {
+  x: number;
+  y: number;
+  tx: number;
+  ty: number;
+  r: number;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  timer: number;
+  hitFlash: number;
+  real?: boolean;
 }
 
 export interface BossEntity {
+  kind: BossKind;
+  name: string;
+  color: string;
   x: number;
   y: number;
   targetY: number;
@@ -116,6 +153,14 @@ export interface BossEntity {
   hitFlash: number;
   timeLeft: number;
   level: number;
+  /** Finished flying in; from here on the boss positions itself. */
+  entered: boolean;
+  phase: number;
+  parts: BossPart[];
+  /** Short live hint shown under the boss HP bar. */
+  status: string;
+  /** Free-form per-boss state (timers, meters, modes). */
+  v: Record<string, number>;
 }
 
 export interface GemEntity {
@@ -130,7 +175,7 @@ export interface GemEntity {
   spin: number;
 }
 
-export type PowerupKind = 'shield' | 'magnet' | 'slow' | 'bomb';
+export type PowerupKind = 'shield' | 'magnet' | 'slow' | 'bomb' | 'key';
 
 export interface PowerupEntity {
   id: number;
@@ -139,9 +184,12 @@ export interface PowerupEntity {
   label: string;
   x: number;
   y: number;
+  vx?: number;
   vy: number;
   r: number;
   pulse: number;
+  /** Seconds before it can be picked up (keys scattered by a boss). */
+  armTime?: number;
 }
 
 export interface BulletEntity {
@@ -151,6 +199,10 @@ export interface BulletEntity {
   vx: number;
   vy: number;
   color: string;
+  /** Fired during Overdrive — the only fire that can pierce NULL's field. */
+  fever?: boolean;
+  /** Already slipped through a boss shield gap. */
+  passed?: boolean;
 }
 
 export interface ParticleEntity {
