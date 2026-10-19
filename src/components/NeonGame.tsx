@@ -34,7 +34,7 @@ import {
   StarEntity,
 } from '../types/game';
 import { sound } from '../utils/audio';
-import { QUESTS, SHIPS } from '../utils/constants';
+import { MAX_WEAPON_LEVEL, QUESTS, SHIPS } from '../utils/constants';
 import { loadGameSave, saveGameData } from '../utils/storage';
 import { AchievementsModal } from './AchievementsModal';
 import { CampaignMap } from './CampaignMap';
@@ -53,6 +53,9 @@ const CLEAR_DELAY = 2.6;
 
 /** Boss is on station and can be fought (not flying in or retreating). */
 const bossReady = (b: BossEntity) => b.entered && b.timeLeft > 0;
+
+/** Raises the auto-blaster's Weapon Power by one level (lost again when a shield breaks). */
+const POWER_PICKUP = { kind: 'power' as const, color: '#fb923c', label: 'WEAPON POWER' };
 
 export const NeonGame: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -96,6 +99,7 @@ export const NeonGame: React.FC = () => {
   const [hudMagnetTimer, setHudMagnetTimer] = useState(0);
   const [hudSlowFieldTimer, setHudSlowFieldTimer] = useState(0);
   const [hudEmpBombs, setHudEmpBombs] = useState(1);
+  const [hudWeaponLevel, setHudWeaponLevel] = useState(1);
   const [hudDashCooldown, setHudDashCooldown] = useState(0);
   const [hudDashMaxCooldown, setHudDashMaxCooldown] = useState(2.2);
   const [hudBossHp, setHudBossHp] = useState(-1);
@@ -335,6 +339,8 @@ export const NeonGame: React.FC = () => {
       dashMaxCooldown: 2.2,
       invulnTimer: 0,
       autoFireTimer: 0,
+      /** Weapon Power 1..MAX_WEAPON_LEVEL: how many barrels the auto-blaster fires. */
+      weaponLevel: 1,
       bossContactCd: 0,
       angle: -Math.PI / 2,
     },
@@ -854,7 +860,7 @@ export const NeonGame: React.FC = () => {
         stopY: e.H * (0.12 + Math.random() * 0.16),
         shotsLeft: 3,
         fireTimer: 0.5,
-        color: '#a78bfa',
+        color: '#ef4444',
         grazed: false,
       });
     }
@@ -889,7 +895,11 @@ export const NeonGame: React.FC = () => {
       { kind: 'slow' as const, color: '#34d399', label: 'TIME WARP' },
       { kind: 'bomb' as const, color: '#fbbf24', label: '+1 EMP BOMB' },
     ];
-    const chosen = types[Math.floor(Math.random() * types.length)];
+    // Weapon Power shows up often until the blaster is maxed out
+    const chosen =
+      e.player.weaponLevel < MAX_WEAPON_LEVEL && Math.random() < 0.4
+        ? POWER_PICKUP
+        : types[Math.floor(Math.random() * types.length)];
     e.powerups.push({
       id: e.entityIdCounter++,
       x: 45 + Math.random() * (e.W - 90),
@@ -901,6 +911,13 @@ export const NeonGame: React.FC = () => {
       label: chosen.label,
       pulse: 0,
     });
+  }, []);
+
+  /** Turrets sometimes leave a Weapon Power pickup behind. */
+  const dropPower = useCallback((x: number, y: number) => {
+    const e = engineRef.current;
+    if (e.player.weaponLevel >= MAX_WEAPON_LEVEL || Math.random() > 0.25) return;
+    e.powerups.push({ id: e.entityIdCounter++, x, y, vy: 110, r: 17, pulse: 0, ...POWER_PICKUP });
   }, []);
 
   // ========================================================
@@ -994,6 +1011,10 @@ export const NeonGame: React.FC = () => {
       addShockwave(e.player.x, e.player.y, '#38bdf8', 190, 4);
       spawnParticles(e.player.x, e.player.y, '#38bdf8', 22, 240, true);
       addFloatingText(e.player.x, e.player.y - 22, 'SHIELD BROKEN!', '#7dd3fc', 15);
+      if (e.player.weaponLevel > 1) {
+        e.player.weaponLevel--;
+        addFloatingText(e.player.x, e.player.y + 26, `POWER DOWN · LV ${e.player.weaponLevel}`, POWER_PICKUP.color, 13);
+      }
       return false;
     }
     startDeath();
@@ -1053,6 +1074,11 @@ export const NeonGame: React.FC = () => {
     e.player.shieldCount =
       (ship.stats.bonusShield && gameModeRef.current !== 'hardcore' ? 1 : 0) + (level ? 1 : 0);
     e.player.empBombs = ship.id === 'sovereign' ? 2 : 1;
+    // Weapon Primer upgrades, plus a head start in the late campaign sectors
+    e.player.weaponLevel = Math.min(
+      MAX_WEAPON_LEVEL,
+      1 + (saveDataRef.current.upgrades.primer || 0) + (level ? Math.floor(level.id / 3) : 0)
+    );
     e.player.magnetTimer = 0;
     e.player.slowFieldTimer = 0;
     e.player.dashTimer = 0;
@@ -1467,23 +1493,48 @@ export const NeonGame: React.FC = () => {
         p.trail.unshift({ x: p.x, y: p.y, dash: isDashingOrFever });
         if (p.trail.length > 16) p.trail.pop();
 
-        // Auto-blaster: unlocked by combo x5, Overdrive, or a boss fight
+        // Auto-blaster: unlocked by combo x5 (lowered by Targeting AI), Overdrive, or a boss fight
+        const up = saveDataRef.current.upgrades;
         p.autoFireTimer -= rawDt;
-        if ((e.combo >= 5 || e.isFeverActive || e.boss) && p.autoFireTimer <= 0) {
-          p.autoFireTimer = e.isFeverActive ? 0.11 : e.boss ? (e.combo >= 10 ? 0.12 : 0.15) : 0.24;
+        if ((e.combo >= Math.max(1, 5 - (up.targeting || 0)) || e.isFeverActive || e.boss) && p.autoFireTimer <= 0) {
+          const interval = e.isFeverActive ? 0.11 : e.boss ? (e.combo >= 10 ? 0.12 : 0.15) : 0.24;
+          p.autoFireTimer = interval / (1 + (up.fireRate || 0) * 0.08);
           const color = e.isFeverActive ? '#fbbf24' : ship.color;
           const fever = e.isFeverActive;
-          const fire = (dx: number, vx: number) =>
-            e.bullets.push({ id: e.entityIdCounter++, x: p.x + dx, y: p.y - 18, vx, vy: -720, color, fever });
-          if (e.isFeverActive) {
+          const dmgMult = 1 + (up.blaster || 0) * 0.12;
+          // A x12 combo still guarantees the twin blaster; Overdrive fires at least the Lv3 spread
+          let lvl = Math.max(p.weaponLevel, e.combo >= 12 ? 2 : 1);
+          if (fever) lvl = Math.min(MAX_WEAPON_LEVEL, Math.max(3, lvl + 1));
+          // Angled side shots hit softer, except during Overdrive
+          const side = fever ? 1 : 0.5;
+          const fire = (dx: number, vx: number, dmg = 1) =>
+            e.bullets.push({
+              id: e.entityIdCounter++,
+              x: p.x + dx,
+              y: p.y - 18,
+              vx,
+              vy: -720,
+              color,
+              fever,
+              damage: dmg * dmgMult,
+            });
+          if (lvl === 1) {
             fire(0, 0);
-            fire(-8, -110);
-            fire(8, 110);
-          } else if (e.combo >= 12) {
+          } else if (lvl <= 3) {
             fire(-7, 0);
             fire(7, 0);
           } else {
+            fire(-10, 0);
             fire(0, 0);
+            fire(10, 0);
+          }
+          if (lvl >= 3) {
+            fire(-8, -110, side);
+            fire(8, 110, side);
+          }
+          if (lvl >= 5) {
+            fire(-10, -220, side);
+            fire(10, 220, side);
           }
         }
       } else {
@@ -1522,8 +1573,9 @@ export const NeonGame: React.FC = () => {
           if (h.type === 'shot' || h.type === 'orb') continue;
           if (Math.hypot(b.x - h.x, b.y - h.y) < h.r + 8) {
             e.bullets.splice(i, 1);
-            if (h.type === 'turret' && (h.hp || 0) > 1) {
-              h.hp = (h.hp || 1) - 1;
+            const dmg = b.damage ?? 1;
+            if (h.type === 'turret' && (h.hp || 0) > dmg) {
+              h.hp = (h.hp || 1) - dmg;
               h.hitFlash = 0.06;
               spawnParticles(b.x, b.y, h.color, 4, 120);
               if (e.hitSoundCd <= 0) {
@@ -1537,6 +1589,7 @@ export const NeonGame: React.FC = () => {
               if (h.type === 'turret') {
                 addShockwave(h.x, h.y, h.color, 70);
                 addFloatingText(h.x, h.y, `+${pts}`, '#c4b5fd', 14);
+                dropPower(h.x, h.y);
                 e.gems.push({
                   id: e.entityIdCounter++,
                   x: h.x,
@@ -1641,7 +1694,7 @@ export const NeonGame: React.FC = () => {
           addFeverEnergy(6.5);
 
           sound.playSound('gem', e.combo);
-          spawnParticles(g.x, g.y, g.val > 1 ? '#f472b6' : '#fbbf24', 7, 130);
+          spawnParticles(g.x, g.y, g.val > 1 ? '#fde047' : '#fbbf24', 7, 130);
           addFloatingText(g.x, g.y, `+${pts}`, '#fde047', 13);
 
           advanceQuest('gems', 1, false);
@@ -1675,7 +1728,9 @@ export const NeonGame: React.FC = () => {
           sound.triggerHaptic(25);
           spawnParticles(pu.x, pu.y, pu.color, 16, 200);
           addShockwave(pu.x, pu.y, pu.color, 70, 2);
-          addFloatingText(pu.x, pu.y - 12, pu.label, pu.color, 14);
+          const maxed = pu.kind === 'power' && p.weaponLevel >= MAX_WEAPON_LEVEL;
+          const label = pu.kind !== 'power' ? pu.label : maxed ? 'MAX POWER!' : `POWER UP · LV ${p.weaponLevel + 1}`;
+          addFloatingText(pu.x, pu.y - 12, label, pu.color, 14);
 
           if (pu.kind === 'key') {
             e.powerups.splice(i, 1);
@@ -1686,6 +1741,10 @@ export const NeonGame: React.FC = () => {
           else if (pu.kind === 'magnet') p.magnetTimer = 8.0;
           else if (pu.kind === 'slow') p.slowFieldTimer = 6.5;
           else if (pu.kind === 'bomb') p.empBombs = Math.min(5, p.empBombs + 1);
+          else if (pu.kind === 'power') {
+            if (maxed) e.score += 375 * e.combo;
+            else p.weaponLevel++;
+          }
           e.score += 125 * e.combo;
           e.powerups.splice(i, 1);
           continue;
@@ -1896,6 +1955,7 @@ export const NeonGame: React.FC = () => {
                 const smashPts = 160 * e.combo;
                 e.score += smashPts;
                 addFloatingText(h.x, h.y, `SMASH! +${smashPts}`, '#67e8f9', 15);
+                if (h.type === 'turret') dropPower(h.x, h.y);
                 advanceQuest('dashkill', 1, false);
                 advanceQuest('combo', e.combo, true);
               }
@@ -1965,6 +2025,7 @@ export const NeonGame: React.FC = () => {
         setHudMagnetTimer(p.magnetTimer);
         setHudSlowFieldTimer(p.slowFieldTimer);
         setHudEmpBombs(p.empBombs);
+        setHudWeaponLevel(p.weaponLevel);
         setHudDashCooldown(p.dashCooldown);
         setHudDashMaxCooldown(p.dashMaxCooldown);
         setHudBossHp(e.boss ? Math.max(0, e.boss.hp / e.boss.maxHp) : -1);
@@ -2249,6 +2310,7 @@ export const NeonGame: React.FC = () => {
     spawnHazardWave,
     spawnGemCluster,
     spawnPowerup,
+    dropPower,
     spawnLaser,
     spawnBoss,
     pushShot,
@@ -2367,6 +2429,7 @@ export const NeonGame: React.FC = () => {
           magnetTimer={hudMagnetTimer}
           slowFieldTimer={hudSlowFieldTimer}
           empBombs={hudEmpBombs}
+          weaponLevel={hudWeaponLevel}
           dashCooldown={hudDashCooldown}
           dashMaxCooldown={hudDashMaxCooldown}
           bossHp={hudBossHp}

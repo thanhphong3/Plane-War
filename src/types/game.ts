@@ -22,7 +22,7 @@ export interface ShipDef {
 }
 
 export interface UpgradeDef {
-  id: 'dashCd' | 'feverDur' | 'shardBonus' | 'shieldCap';
+  id: 'dashCd' | 'feverDur' | 'shardBonus' | 'shieldCap' | 'blaster' | 'fireRate' | 'targeting' | 'primer';
   name: string;
   desc: string;
   baseCost: number;
@@ -66,6 +66,10 @@ export interface SaveData {
     feverDur: number;
     shardBonus: number;
     shieldCap: number;
+    blaster: number;
+    fireRate: number;
+    targeting: number;
+    primer: number;
   };
   muted: boolean;
   bgmMuted: boolean;
@@ -175,7 +179,7 @@ export interface GemEntity {
   spin: number;
 }
 
-export type PowerupKind = 'shield' | 'magnet' | 'slow' | 'bomb' | 'key';
+export type PowerupKind = 'shield' | 'magnet' | 'slow' | 'bomb' | 'key' | 'power';
 
 export interface PowerupEntity {
   id: number;
@@ -201,6 +205,8 @@ export interface BulletEntity {
   color: string;
   /** Fired during Overdrive — the only fire that can pierce NULL's field. */
   fever?: boolean;
+  /** Damage dealt on hit (defaults to 1). Scales with weapon level and Blaster Core. */
+  damage?: number;
   /** Already slipped through a boss shield gap. */
   passed?: boolean;
 }

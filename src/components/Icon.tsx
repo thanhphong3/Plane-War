@@ -1,25 +1,33 @@
 import React from 'react';
 import {
+  ChevronsUp,
+  Crosshair,
   Crown,
   Flame,
+  Gauge,
   Gem,
   LucideProps,
   Rocket,
   Shield,
   Skull,
   Sparkles,
+  Target,
   Trophy,
   Zap,
 } from 'lucide-react';
 
 const ICONS: Record<string, React.ComponentType<LucideProps>> = {
+  chevrons: ChevronsUp,
+  crosshair: Crosshair,
   crown: Crown,
   flame: Flame,
+  gauge: Gauge,
   gem: Gem,
   rocket: Rocket,
   shield: Shield,
   skull: Skull,
   sparkles: Sparkles,
+  target: Target,
   trophy: Trophy,
   zap: Zap,
 };

@@ -115,7 +115,42 @@ export const UPGRADES: UpgradeDef[] = [
     maxLevel: 5,
     icon: 'shield',
   },
+  {
+    id: 'blaster',
+    name: 'Blaster Core',
+    desc: 'Every bullet hits harder (+12% damage per level)',
+    baseCost: 120,
+    maxLevel: 5,
+    icon: 'crosshair',
+  },
+  {
+    id: 'fireRate',
+    name: 'Rapid Cycler',
+    desc: 'Auto-blaster fires faster (+8% fire rate per level)',
+    baseCost: 140,
+    maxLevel: 5,
+    icon: 'gauge',
+  },
+  {
+    id: 'targeting',
+    name: 'Targeting AI',
+    desc: 'Auto-blaster comes online at a lower combo (x5 → x1)',
+    baseCost: 100,
+    maxLevel: 4,
+    icon: 'target',
+  },
+  {
+    id: 'primer',
+    name: 'Weapon Primer',
+    desc: 'Start every run with +1 Weapon Power level',
+    baseCost: 220,
+    maxLevel: 2,
+    icon: 'chevrons',
+  },
 ];
+
+/** Highest in-run Weapon Power level (collected from POWER pickups). */
+export const MAX_WEAPON_LEVEL = 5;
 
 export const QUESTS: QuestDef[] = [
   { id: 'q1', type: 'nearmiss', target: 4, reward: 35, label: 'Pull off 4 near-misses' },
@@ -244,6 +279,10 @@ export const INITIAL_SAVE: SaveData = {
     feverDur: 0,
     shardBonus: 0,
     shieldCap: 0,
+    blaster: 0,
+    fireRate: 0,
+    targeting: 0,
+    primer: 0,
   },
   muted: false,
   bgmMuted: false,

@@ -1,7 +1,8 @@
 import React from 'react';
-import { Bomb, Hourglass, Magnet, Music, Pause, Radio, Shield, Skull, Target, Timer, Volume2, VolumeX, Zap } from 'lucide-react';
+import { Bomb, ChevronsUp, Hourglass, Magnet, Music, Pause, Radio, Shield, Skull, Target, Timer, Volume2, VolumeX, Zap } from 'lucide-react';
 import { LevelDef, SPEAKERS, SpeakerId } from '../game/campaign';
 import { GameMode, QuestDef } from '../types/game';
+import { MAX_WEAPON_LEVEL } from '../utils/constants';
 import { ShardIcon } from './Icon';
 
 export interface CommMessage {
@@ -24,6 +25,8 @@ interface HUDProps {
   magnetTimer: number;
   slowFieldTimer: number;
   empBombs: number;
+  /** Auto-blaster Weapon Power, 1..MAX_WEAPON_LEVEL. */
+  weaponLevel: number;
   dashCooldown: number;
   dashMaxCooldown: number;
   bossHp: number;
@@ -77,6 +80,7 @@ export const HUD: React.FC<HUDProps> = ({
   magnetTimer,
   slowFieldTimer,
   empBombs,
+  weaponLevel,
   dashCooldown,
   dashMaxCooldown,
   bossHp,
@@ -202,8 +206,13 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
 
         {/* Active Buffs */}
-        {(shieldCount > 0 || magnetTimer > 0 || slowFieldTimer > 0) && (
+        {(weaponLevel > 1 || shieldCount > 0 || magnetTimer > 0 || slowFieldTimer > 0) && (
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            {weaponLevel > 1 && (
+              <span className="buff-chip bg-orange-500/20 border-orange-400/50 text-orange-200">
+                <ChevronsUp size={11} /> {weaponLevel >= MAX_WEAPON_LEVEL ? 'MAX' : `LV ${weaponLevel}`}
+              </span>
+            )}
             {shieldCount > 0 && (
               <span className="buff-chip bg-sky-500/20 border-sky-400/50 text-sky-200">
                 <Shield size={11} /> x{shieldCount}

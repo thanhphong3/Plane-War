@@ -288,27 +288,61 @@ export function drawFog(ctx: Ctx, W: number, H: number, px: number, py: number, 
 }
 
 // ---------------------------------------------------------------------------
+// Visual grammar — the player should never have to memorise colours:
+//   COLLECT  gold / white-rimmed, soft shapes, sparkles, rings that pull INWARD
+//   DODGE    every harmful thing carries a red danger rim and flares red up close
+//   DASH IT  cyan dashed target ring (plasma cores you can parry)
+// ---------------------------------------------------------------------------
+export const DANGER = '#ff2d55';
+export const DASH_CUE = '#67e8f9';
+
+/** Proximity alarm strength (0..1) for a hazard of radius r at distance d. */
+function nearness(d: number, r: number, range: number): number {
+  return Math.max(0, Math.min(1, 1 - (d - r) / range));
+}
+
+/** Four-point twinkle used only on collectibles. */
+function sparkle(ctx: Ctx, x: number, y: number, s: number, alpha: number) {
+  if (alpha <= 0 || s <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, alpha);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(x, y - s);
+  ctx.quadraticCurveTo(x, y, x + s, y);
+  ctx.quadraticCurveTo(x, y, x, y + s);
+  ctx.quadraticCurveTo(x, y, x - s, y);
+  ctx.quadraticCurveTo(x, y, x, y - s);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
 // Entities
 // ---------------------------------------------------------------------------
 export function drawGem(ctx: Ctx, g: GemEntity, t: number) {
   const big = g.val > 1;
-  const color = big ? '#f472b6' : '#fbbf24';
-  const light = big ? '#fce7f3' : '#fef3c7';
-  drawGlow(ctx, g.x, g.y, g.r * 3, color, 0.75);
+  // Collectibles stay in the gold family — never the pinks/reds used by enemies
+  const color = big ? '#fde047' : '#fbbf24';
+  drawGlow(ctx, g.x, g.y, g.r * (big ? 3.8 : 3), color, big ? 0.9 : 0.7);
   ctx.save();
   ctx.translate(g.x, g.y);
   const sx = Math.cos(g.spin + t * 3);
   const w = g.r * 0.85 * Math.max(0.18, Math.abs(sx));
-  ctx.fillStyle = color;
   ctx.beginPath();
   ctx.moveTo(0, -g.r);
   ctx.lineTo(w, -g.r * 0.15);
   ctx.lineTo(0, g.r);
   ctx.lineTo(-w, -g.r * 0.15);
   ctx.closePath();
+  ctx.fillStyle = color;
   ctx.fill();
+  // Crisp white edge: friendly items are outlined in white, hazards in red
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
   // Bright facet
-  ctx.fillStyle = light;
+  ctx.fillStyle = '#fffbeb';
   ctx.beginPath();
   ctx.moveTo(0, -g.r);
   ctx.lineTo(sx > 0 ? w : -w, -g.r * 0.15);
@@ -316,6 +350,16 @@ export function drawGem(ctx: Ctx, g: GemEntity, t: number) {
   ctx.closePath();
   ctx.fill();
   ctx.restore();
+
+  // Twinkle
+  const tw = Math.sin(t * 5 + g.id * 1.7);
+  if (tw > 0.55) sparkle(ctx, g.x + g.r * 0.7, g.y - g.r * 0.75, 2 + g.r * 0.6 * ((tw - 0.55) / 0.45), 1);
+  if (big) {
+    for (let k = 0; k < 2; k++) {
+      const a = t * 3 + k * Math.PI + g.id;
+      sparkle(ctx, g.x + Math.cos(a) * g.r * 1.7, g.y + Math.sin(a) * g.r * 1.7, 3.2, 0.9);
+    }
+  }
 }
 
 function drawPowerGlyph(ctx: Ctx, kind: PowerupEntity['kind'], s: number) {
@@ -356,6 +400,15 @@ function drawPowerGlyph(ctx: Ctx, kind: PowerupEntity['kind'], s: number) {
     ctx.moveTo(0, s * 0.85);
     ctx.lineTo(s * 0.3, s * 0.85);
     ctx.stroke();
+  } else if (kind === 'power') {
+    // Double chevron: "level up"
+    for (const oy of [-s * 0.45, s * 0.25]) {
+      ctx.moveTo(-s * 0.7, oy + s * 0.45);
+      ctx.lineTo(0, oy - s * 0.2);
+      ctx.lineTo(s * 0.7, oy + s * 0.45);
+    }
+    ctx.lineWidth = 3;
+    ctx.stroke();
   } else {
     ctx.arc(-s * 0.1, s * 0.15, s * 0.62, 0, Math.PI * 2);
     ctx.fill();
@@ -366,57 +419,105 @@ function drawPowerGlyph(ctx: Ctx, kind: PowerupEntity['kind'], s: number) {
   }
 }
 
+const POWER_LABELS: Record<PowerupEntity['kind'], string> = {
+  shield: 'SHIELD',
+  magnet: 'MAGNET',
+  slow: 'SLOW-MO',
+  bomb: '+EMP',
+  key: 'ROOT KEY',
+  power: 'POWER',
+};
+
 export function drawPowerup(ctx: Ctx, p: PowerupEntity, t: number) {
-  const pulse = 1 + Math.sin(p.pulse) * 0.08;
-  drawGlow(ctx, p.x, p.y, p.r * 3.2, p.color, 0.7);
+  const arming = !!p.armTime && p.armTime > 0;
+  const y = p.y + Math.sin(p.pulse * 0.6) * 3; // gentle bob: pickups float, hazards don't
+  const r = p.r;
+  drawGlow(ctx, p.x, y, r * 3.2, p.color, 0.7);
   ctx.save();
   // Still arming: shown faded so it reads as "not yet"
-  if (p.armTime && p.armTime > 0) ctx.globalAlpha = 0.35 + Math.sin(t * 20) * 0.15;
-  ctx.translate(p.x, p.y);
-  ctx.scale(pulse, pulse);
+  if (arming) ctx.globalAlpha = 0.35 + Math.sin(t * 20) * 0.15;
+  ctx.translate(p.x, y);
 
-  // Hex capsule
-  ctx.beginPath();
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
-    const px = Math.cos(a) * p.r;
-    const py = Math.sin(a) * p.r;
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
+  // "Come get me": rings that shrink INTO the item (hazard warnings expand outward)
+  if (!arming) {
+    for (const k of [0, 0.5]) {
+      const ph = (t * 1.1 + k + p.id * 0.13) % 1;
+      ctx.strokeStyle = hexToRgba(p.color, ph * 0.75);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, r + 4 + (1 - ph) * 20, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
-  ctx.closePath();
-  ctx.fillStyle = hexToRgba(p.color, 0.35);
+
+  // Soft round bubble with a white rim — a shape no enemy uses
+  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.35, 1, 0, 0, r);
+  g.addColorStop(0, 'rgba(255,255,255,0.6)');
+  g.addColorStop(0.4, hexToRgba(p.color, 0.5));
+  g.addColorStop(1, hexToRgba(p.color, 0.22));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = p.color;
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
   ctx.lineWidth = 2;
   ctx.stroke();
-
-  // Orbiting dashed ring
-  ctx.save();
-  ctx.rotate(t * 2);
-  ctx.setLineDash([5, 6]);
-  ctx.strokeStyle = hexToRgba(p.color, 0.8);
+  ctx.strokeStyle = p.color;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.arc(0, 0, p.r + 6, 0, Math.PI * 2);
+  ctx.arc(0, 0, r - 3, 0, Math.PI * 2);
   ctx.stroke();
+  // Glossy highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.beginPath();
+  ctx.ellipse(-r * 0.36, -r * 0.48, r * 0.3, r * 0.14, -0.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawPowerGlyph(ctx, p.kind, r * 0.5);
+
+  // Name tag so new pilots know what they're grabbing
+  ctx.font = "800 9px 'Orbitron', sans-serif";
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = 'rgba(2,6,23,0.9)';
+  ctx.lineWidth = 3;
+  ctx.strokeText(POWER_LABELS[p.kind], 0, r + 13);
+  ctx.fillStyle = p.color;
+  ctx.fillText(POWER_LABELS[p.kind], 0, r + 13);
   ctx.restore();
 
-  drawPowerGlyph(ctx, p.kind, p.r * 0.5);
-  ctx.restore();
+  if (!arming) {
+    const tw = Math.sin(t * 4 + p.id);
+    if (tw > 0.5) sparkle(ctx, p.x + r * 0.75, y - r * 0.8, 2 + 4 * ((tw - 0.5) / 0.5), 1);
+  }
 }
 
 export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py: number) {
   const flash = (h.hitFlash || 0) > 0;
 
+  const near = nearness(Math.hypot(px - h.x, py - h.y), h.r, h.type === 'shot' ? 110 : 120);
+
   if (h.type === 'shot') {
     // Ghost shots fade almost out of sight, then flare back
     const a = h.ghost ? 0.12 + 0.88 * Math.abs(Math.sin(t * 2.6 + h.id * 0.7)) : 1;
-    drawGlow(ctx, h.x, h.y, h.r * 3.2, h.color, 0.9 * a);
-    ctx.fillStyle = h.ghost ? `rgba(255,255,255,${a})` : '#ffffff';
+    // Proximity alarm: the closer it gets to the pilot, the redder it burns
+    if (near > 0) drawGlow(ctx, h.x, h.y, h.r * (3 + near * 2.5), DANGER, 0.6 * near);
+    drawGlow(ctx, h.x, h.y, h.r * 3, h.color, 0.8 * a);
+    ctx.fillStyle = hexToRgba(h.color, a);
     ctx.beginPath();
-    ctx.arc(h.x, h.y, h.r * 0.55, 0, Math.PI * 2);
+    ctx.arc(h.x, h.y, h.r * 0.85, 0, Math.PI * 2);
     ctx.fill();
+    ctx.fillStyle = `rgba(255,255,255,${a})`;
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, h.r * 0.42, 0, Math.PI * 2);
+    ctx.fill();
+    // Universal danger rim — stays faintly visible even on ghost shots, so they're fair
+    ctx.strokeStyle = hexToRgba(DANGER, Math.max(0.35, a));
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, h.r * 0.95, 0, Math.PI * 2);
+    ctx.stroke();
     if (h.glitch !== undefined) {
       ctx.strokeStyle = hexToRgba(h.color, 0.8);
       ctx.lineWidth = 1.5;
@@ -441,23 +542,56 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     ctx.beginPath();
     ctx.arc(0, 0, h.r * (1 + Math.sin(t * 12) * 0.06), 0, Math.PI * 2);
     ctx.fill();
-    ctx.rotate(t * 4);
-    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 6]);
-    ctx.beginPath();
-    ctx.arc(0, 0, h.r + 7, 0, Math.PI * 2);
-    ctx.stroke();
+    if (!h.reflected) {
+      // Red rim: touching it normally still hurts
+      ctx.strokeStyle = DANGER;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, h.r, 0, Math.PI * 2);
+      ctx.stroke();
+      // Cyan target reticle: the "dash into me" cue, tightening as the pilot approaches
+      const tight = h.r + 8 + (1 - near) * 6 + Math.sin(t * 8) * 2;
+      ctx.save();
+      ctx.rotate(t * 3);
+      ctx.strokeStyle = DASH_CUE;
+      ctx.lineWidth = 2.5;
+      for (let k = 0; k < 4; k++) {
+        ctx.rotate(Math.PI / 2);
+        ctx.beginPath();
+        ctx.arc(0, 0, tight, -0.45, 0.45);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
     ctx.restore();
     if (!h.reflected) {
       ctx.save();
-      ctx.font = "800 9px 'Orbitron', sans-serif";
+      ctx.font = "800 10px 'Orbitron', sans-serif";
       ctx.textAlign = 'center';
-      ctx.fillStyle = '#fef3c7';
-      ctx.fillText('DASH!', h.x, h.y + h.r + 16);
+      ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(2,6,23,0.9)';
+      ctx.lineWidth = 3;
+      ctx.strokeText('DASH INTO IT', h.x, h.y + h.r + 20);
+      ctx.fillStyle = DASH_CUE;
+      ctx.fillText('DASH INTO IT', h.x, h.y + h.r + 20);
       ctx.restore();
     }
     return;
+  }
+
+  // Proximity alarm for bodies: a red dashed ring that firms up as they close in
+  if (near > 0) {
+    drawGlow(ctx, h.x, h.y, h.r * 3.2, DANGER, 0.35 * near);
+    ctx.save();
+    ctx.strokeStyle = hexToRgba(DANGER, 0.85 * near);
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.lineDashOffset = -t * 30;
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, h.r + 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawGlow(ctx, h.x, h.y, h.r * 2.6, h.color, 0.55);
@@ -522,8 +656,8 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     ctx.lineTo(-h.r, h.r * 0.8);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = DANGER;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
     // Blinking eye
     const blink = Math.sin(t * 14 + h.id) > 0;
@@ -532,21 +666,21 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     ctx.arc(h.r * 0.25, 0, 2.6, 0, Math.PI * 2);
     ctx.fill();
   } else if (h.type === 'turret') {
-    // Hexagonal gun platform with an aiming barrel
+    // Spiked diamond gun platform — angular on purpose, so it never reads as a round pickup
     ctx.save();
-    ctx.rotate(t * 0.8);
+    ctx.rotate(Math.PI / 4 + Math.sin(t * 1.5) * 0.15);
     ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
-      const px2 = Math.cos(a) * h.r;
-      const py2 = Math.sin(a) * h.r;
-      if (i === 0) ctx.moveTo(px2, py2);
-      else ctx.lineTo(px2, py2);
+    const s = h.r * 0.82;
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      const b = a + Math.PI / 4;
+      ctx.lineTo(Math.cos(a) * h.r * 1.25, Math.sin(a) * h.r * 1.25);
+      ctx.lineTo(Math.cos(b) * s, Math.sin(b) * s);
     }
     ctx.closePath();
     const tg = ctx.createRadialGradient(0, 0, 2, 0, 0, h.r);
-    tg.addColorStop(0, '#312e81');
-    tg.addColorStop(1, '#1e1b4b');
+    tg.addColorStop(0, '#450a0a');
+    tg.addColorStop(1, '#1c0606');
     ctx.fillStyle = flash ? '#ffffff' : tg;
     ctx.fill();
     ctx.strokeStyle = h.color;
@@ -557,7 +691,7 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     const aim = Math.atan2(py - h.y, px - h.x);
     ctx.save();
     ctx.rotate(aim);
-    ctx.fillStyle = '#e9d5ff';
+    ctx.fillStyle = '#fecaca';
     ctx.fillRect(0, -3.5, h.r + 8, 7);
     ctx.restore();
     ctx.fillStyle = h.color;
@@ -571,7 +705,7 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     // HP pips
     const hp = h.hp || 0;
     for (let i = 0; i < hp; i++) {
-      ctx.fillStyle = '#c4b5fd';
+      ctx.fillStyle = '#fca5a5';
       ctx.fillRect(-h.r + i * 9, h.r + 6, 7, 3);
     }
   } else {
@@ -591,8 +725,8 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     dg.addColorStop(1, h.color);
     ctx.fillStyle = flash ? '#ffffff' : dg;
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = DANGER;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
 
     ctx.fillStyle = '#0f172a';

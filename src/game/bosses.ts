@@ -107,6 +107,11 @@ function isDashing(api: BossApi): boolean {
   return api.player.dashTimer > 0 || api.fever;
 }
 
+/** Damage carried by one player bullet (weapon level + Blaster Core). */
+function bulletDmg(bl: BulletEntity): number {
+  return bl.damage ?? 1;
+}
+
 /** Applies damage, respecting a per-phase HP floor (`v.floor`) and lock (`v.lock`). */
 function damage(b: BossEntity, api: BossApi, amount: number) {
   if (b.hp <= 0 || b.v.lock) return;
@@ -263,7 +268,7 @@ const sentinel: BossBehavior = {
   },
   bullet(b, api, bl) {
     if (dist(bl.x, bl.y, b.x, b.y) >= b.r * 0.9) return null;
-    damage(b, api, 1);
+    damage(b, api, bulletDmg(bl));
     return 'hit';
   },
   contact(b, api, dashing) {
@@ -343,7 +348,7 @@ const gatekeeper: BossBehavior = {
   bullet(b, api, bl) {
     if (gateBlocks(bl, b.x, b.y, b.v.R, b.v.shield, b.v.gap)) return 'block';
     if (!bl.passed || dist(bl.x, bl.y, b.x, b.y) >= b.r * 0.75) return null;
-    damage(b, api, 1);
+    damage(b, api, bulletDmg(bl));
     return 'hit';
   },
   contact(b, api, dashing) {
@@ -540,7 +545,7 @@ const twins: BossBehavior = {
     for (let i = 0; i < 2; i++) {
       const pt = b.parts[i];
       if (pt.alive && dist(bl.x, bl.y, pt.x, pt.y) < pt.r * 0.95) {
-        twinDamage(b, api, i, 1);
+        twinDamage(b, api, i, bulletDmg(bl));
         return 'hit';
       }
     }
@@ -626,7 +631,7 @@ const furnace: BossBehavior = {
     const d = dist(bl.x, bl.y, b.x, b.y);
     if (d >= b.r * 0.95) return null;
     if (b.v.vent > 0 && d < b.r * 0.75) {
-      damage(b, api, 1.4);
+      damage(b, api, 1.4 * bulletDmg(bl));
       return 'hit';
     }
     return 'block';
@@ -807,8 +812,9 @@ const wraith: BossBehavior = {
         return 'block';
       }
       pt.hitFlash = 0.06;
-      damage(b, api, b.v.reveal > 0 ? 1.5 : 1);
-      b.v.chunk += 1;
+      const dmg = (b.v.reveal > 0 ? 1.5 : 1) * bulletDmg(bl);
+      damage(b, api, dmg);
+      b.v.chunk += dmg;
       if (b.v.chunk >= b.maxHp * 0.18 && b.hp > 0) {
         b.v.chunk = 0;
         api.text(pt.x, pt.y - 30, 'IT SHIFTS!', '#c4b5fd', 16);
@@ -973,7 +979,7 @@ const singularity: BossBehavior = {
     const d = dist(bl.x, bl.y, b.x, b.y);
     if (b.v.collapse > 0) {
       if (d < b.r * 0.85) {
-        damage(b, api, 1.5);
+        damage(b, api, 1.5 * bulletDmg(bl));
         return 'hit';
       }
     } else if (d < b.r * 0.95) {
@@ -981,7 +987,7 @@ const singularity: BossBehavior = {
     }
     for (const n of b.parts) {
       if (!n.alive || dist(bl.x, bl.y, n.x, n.y) >= n.r + 4) continue;
-      n.hp -= 1;
+      n.hp -= bulletDmg(bl);
       n.hitFlash = 0.06;
       if (n.hp <= 0) singularityNodeDown(b, api, n);
       return 'hit';
@@ -1260,7 +1266,7 @@ const nullBoss: BossBehavior = {
       if (d >= b.r * 1.25) return null;
       if (bl.fever || b.v.fieldOff > 0) {
         if (d >= b.r * 0.85) return null;
-        damage(b, api, 1);
+        damage(b, api, bulletDmg(bl));
         return 'hit';
       }
       if (b.v.nullText <= 0) {
@@ -1271,7 +1277,7 @@ const nullBoss: BossBehavior = {
     }
     if (nullEcho(b) === 'gate' && gateBlocks(bl, b.x, b.y, b.v.R, b.v.shield, 1.2)) return 'block';
     if (d >= b.r * 0.85) return null;
-    damage(b, api, b.v.stun > 0 ? 2 : 1);
+    damage(b, api, (b.v.stun > 0 ? 2 : 1) * bulletDmg(bl));
     return 'hit';
   },
   contact(b, api, dashing) {

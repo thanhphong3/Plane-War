@@ -245,6 +245,30 @@ export const MainMenu: React.FC<MainMenuProps> = ({
               <strong className="text-amber-300">Overdrive</strong>.
             </span>
           </div>
+          {/* Visual grammar legend: what to grab, what to dodge, what to dash into */}
+          <div className="grid grid-cols-3 gap-1.5 pt-1">
+            <span className="flex items-center gap-1.5 rounded-lg bg-amber-400/10 border border-amber-300/30 px-2 py-1.5">
+              <span className="relative w-4 h-4 shrink-0 rounded-full border-2 border-white bg-amber-300/60 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
+              <span className="leading-tight">
+                <strong className="text-amber-200 block text-[11px]">GRAB</strong>
+                <span className="text-[10px] text-slate-400">white rim, sparkles</span>
+              </span>
+            </span>
+            <span className="flex items-center gap-1.5 rounded-lg bg-rose-500/10 border border-rose-400/30 px-2 py-1.5">
+              <span className="w-4 h-4 shrink-0 rounded-full border-2 border-[#ff2d55] bg-pink-400/70 shadow-[0_0_8px_rgba(255,45,85,0.9)]" />
+              <span className="leading-tight">
+                <strong className="text-rose-300 block text-[11px]">DODGE</strong>
+                <span className="text-[10px] text-slate-400">red rim = hurts</span>
+              </span>
+            </span>
+            <span className="flex items-center gap-1.5 rounded-lg bg-cyan-500/10 border border-cyan-400/30 px-2 py-1.5">
+              <span className="w-4 h-4 shrink-0 rounded-full border-2 border-dashed border-cyan-300 bg-orange-400/70" />
+              <span className="leading-tight">
+                <strong className="text-cyan-200 block text-[11px]">DASH IN</strong>
+                <span className="text-[10px] text-slate-400">cyan target</span>
+              </span>
+            </span>
+          </div>
           <div className="hidden sm:flex items-start gap-2.5 text-slate-400">
             <span className="how-icon bg-slate-700/40 text-slate-300">
               <Keyboard size={13} />
