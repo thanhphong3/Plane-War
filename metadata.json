@@ -1,0 +1,6 @@
+{
+  "name": "NEON BLITZ: Siêu Tốc Độ",
+  "description": "Trò chơi phản xạ phi thuyền neon siêu tốc độ gây nghiện với các kỹ năng lướt phá, né sát nút và cuồng nộ bất tử.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
