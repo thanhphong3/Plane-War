@@ -232,8 +232,9 @@ export const MainMenu: React.FC<MainMenuProps> = ({
               <Zap size={13} />
             </span>
             <span>
-              <strong className="text-white">Double-tap</strong> or hit <strong className="text-cyan-300">DASH</strong> to
-              smash straight through enemies.
+              <strong className="text-white">Double-tap</strong> or hit <strong className="text-cyan-300">DASH</strong> for a
+              short <strong className="text-white">invincible burst</strong>: ram enemies to smash them (+combo), ram
+              Plasma Cores to fire them back. Recharges in ~2s.
             </span>
           </div>
           <div className="flex items-start gap-2.5">

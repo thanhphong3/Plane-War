@@ -134,7 +134,7 @@ export const UPGRADES: UpgradeDef[] = [
   {
     id: 'targeting',
     name: 'Targeting AI',
-    desc: 'Auto-blaster comes online at a lower combo (x5 → x1)',
+    desc: 'Auto-blaster reaches full fire rate at a lower combo (x5 → x1)',
     baseCost: 100,
     maxLevel: 4,
     icon: 'target',
@@ -262,6 +262,9 @@ export function hasClaimableAchievement(save: SaveData): boolean {
   return ACHIEVEMENTS.some((a) => !save.unlockedAchievements.includes(a.id) && a.isEligible(save));
 }
 
+/** Keep pointing out Dash targets until the pilot has landed this many Dash smashes. */
+export const DASH_COACH_SMASHES = 12;
+
 export const INITIAL_SAVE: SaveData = {
   shards: 80,
   bestEndless: 0,
@@ -272,6 +275,7 @@ export const INITIAL_SAVE: SaveData = {
   totalRuns: 0,
   totalNearMisses: 0,
   totalBossKills: 0,
+  totalDashSmashes: 0,
   selectedShip: 'striker',
   unlockedShips: ['striker'],
   upgrades: {

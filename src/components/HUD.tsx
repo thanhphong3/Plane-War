@@ -29,6 +29,8 @@ interface HUDProps {
   weaponLevel: number;
   dashCooldown: number;
   dashMaxCooldown: number;
+  /** An enemy is in Dash range and the coach wants the pilot to ram it. */
+  dashHint: boolean;
   bossHp: number;
   bossName: string;
   bossStatus: string;
@@ -83,6 +85,7 @@ export const HUD: React.FC<HUDProps> = ({
   weaponLevel,
   dashCooldown,
   dashMaxCooldown,
+  dashHint,
   bossHp,
   bossName,
   bossStatus,
@@ -350,34 +353,47 @@ export const HUD: React.FC<HUDProps> = ({
             </span>
           </button>
 
-          <button
-            type="button"
-            onClick={onTriggerDash}
-            disabled={!dashReady}
-            aria-label="Hyper Dash"
-            className={`relative w-[76px] h-[76px] sm:w-[84px] sm:h-[84px] rounded-full flex flex-col items-center justify-center btn-cyber ${
-              dashReady ? 'bg-cyan-500/25 dash-ready' : 'bg-slate-900/80'
-            }`}
-          >
-            <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 80 80">
-              <circle cx="40" cy="40" r={ringR} fill="none" stroke="rgba(51,65,85,0.9)" strokeWidth="4" />
-              <circle
-                cx="40"
-                cy="40"
-                r={ringR}
-                fill="none"
-                stroke={dashReady ? '#67e8f9' : '#22d3ee'}
-                strokeWidth="4"
-                strokeLinecap="round"
-                strokeDasharray={ringC}
-                strokeDashoffset={ringC * (1 - Math.max(0, Math.min(1, dashProgress)))}
-              />
-            </svg>
-            <Zap size={26} className={dashReady ? 'text-cyan-100' : 'text-slate-500'} fill={dashReady ? 'currentColor' : 'none'} />
-            <span className={`text-[10px] font-black uppercase font-cyber ${dashReady ? 'text-cyan-100' : 'text-slate-500'}`}>
-              Dash
-            </span>
-          </button>
+          <div className="relative">
+            {/* Dash coach bubble: says what the button does right when it's worth pressing */}
+            {dashHint && (
+              <div className="absolute bottom-full right-0 mb-2 w-max max-w-[160px] px-2.5 py-1.5 rounded-xl bg-cyan-950/90 border border-cyan-300/70 shadow-lg shadow-cyan-500/30 text-right anim-pop">
+                <p className="text-[11px] font-black font-cyber text-cyan-100 tracking-wider leading-tight">DASH NOW!</p>
+                <p className="text-[10px] text-cyan-200/90 leading-tight mt-0.5">Ram the marked enemy — you can't be hurt mid-dash</p>
+                <span className="absolute -bottom-1.5 right-8 w-3 h-3 rotate-45 bg-cyan-950 border-r border-b border-cyan-300/70" />
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={onTriggerDash}
+              disabled={!dashReady}
+              aria-label="Hyper Dash: short invincible burst that smashes enemies"
+              title="Hyper Dash (double-tap / Space): short invincible burst. Ram enemies to smash them, ram Plasma Cores to send them back."
+              className={`relative w-[76px] h-[76px] sm:w-[84px] sm:h-[84px] rounded-full flex flex-col items-center justify-center btn-cyber ${
+                dashReady ? 'bg-cyan-500/25 dash-ready' : 'bg-slate-900/80'
+              } ${dashHint ? 'ring-4 ring-cyan-300/60' : ''}`}
+            >
+              <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 80 80">
+                <circle cx="40" cy="40" r={ringR} fill="none" stroke="rgba(51,65,85,0.9)" strokeWidth="4" />
+                <circle
+                  cx="40"
+                  cy="40"
+                  r={ringR}
+                  fill="none"
+                  stroke={dashReady ? '#67e8f9' : '#22d3ee'}
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                  strokeDasharray={ringC}
+                  strokeDashoffset={ringC * (1 - Math.max(0, Math.min(1, dashProgress)))}
+                />
+              </svg>
+              <Zap size={26} className={dashReady ? 'text-cyan-100' : 'text-slate-500'} fill={dashReady ? 'currentColor' : 'none'} />
+              <span
+                className={`text-[10px] font-black font-cyber tabular-nums ${dashReady ? 'text-cyan-100' : 'text-slate-400'}`}
+              >
+                {dashReady ? 'DASH' : `${dashCooldown.toFixed(1)}s`}
+              </span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

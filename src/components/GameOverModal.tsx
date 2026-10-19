@@ -38,12 +38,14 @@ const MODE_NAMES: Record<GameMode, string> = {
 };
 
 const TIPS = [
-  'Dash through enemies to smash them and boost your combo.',
+  'Dash makes you invincible for a split second. Ram enemies with it to smash them and boost your combo.',
+  'Dash INTO a Plasma Core (cyan target ring) to fire it back at the boss.',
   'Near-misses fill Overdrive 3x faster than shards.',
   'Laser columns flash before they fire — slide out sideways.',
   'Enemy bullets have a tiny hitbox. Graze them for points!',
   'Save your EMP for when a Sentinel fills the screen.',
-  'At x5 combo your ship auto-fires. At x12 it double-fires.',
+  'At x5 combo your blaster fires at full rate. At x12 it double-fires.',
+  'Retry Boss skips the flight, so the no-hit star needs a full run.',
 ];
 
 /** Score counter that ticks up when the modal opens. */

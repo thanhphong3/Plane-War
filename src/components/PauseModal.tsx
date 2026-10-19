@@ -1,5 +1,5 @@
 import React from 'react';
-import { House, Music, Pause, Play, RotateCcw, Volume2, VolumeX } from 'lucide-react';
+import { Bomb, Flame, House, Music, Pause, Play, RotateCcw, Volume2, VolumeX, Zap } from 'lucide-react';
 import { sound } from '../utils/audio';
 
 interface PauseModalProps {
@@ -53,6 +53,31 @@ export const PauseModal: React.FC<PauseModalProps> = ({
             <Music size={14} className={isBgmMuted ? 'opacity-40' : ''} />
             <span>{isBgmMuted ? 'Music Off' : 'Music On'}</span>
           </button>
+        </div>
+
+        {/* Ability cheat sheet: pausing is when players actually read */}
+        <div className="text-left text-[11px] text-slate-300 bg-slate-900/80 p-3 rounded-2xl border border-slate-800 space-y-2">
+          <div className="flex items-start gap-2">
+            <Zap size={14} className="text-cyan-300 shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-cyan-200">DASH</strong> (double-tap / Space): a short burst where nothing can hurt you.
+              Ram enemies to smash them, ram Plasma Cores to fire them back, snap boss tethers. ~2s recharge.
+            </span>
+          </div>
+          <div className="flex items-start gap-2">
+            <Bomb size={14} className="text-amber-300 shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-amber-200">EMP</strong> (E): clears the screen and turns enemies into shards. Limited
+              charges.
+            </span>
+          </div>
+          <div className="flex items-start gap-2">
+            <Flame size={14} className="text-fuchsia-300 shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-fuchsia-200">OVERDRIVE</strong>: fill Energy with near-misses. While it lasts you act
+              like a non-stop Dash.
+            </span>
+          </div>
         </div>
 
         <div className="space-y-2.5 pt-1">

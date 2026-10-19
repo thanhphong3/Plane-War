@@ -1,40 +1,13 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Sparkles } from 'lucide-react';
-import {
-  drawBackground,
-  drawFog,
-  drawGem,
-  drawGlow,
-  drawHazard,
-  drawLaser,
-  drawPowerup,
-  drawShip,
-  drawVignette,
-  hexToRgba,
-} from '../game/render';
-import { drawBossEntity } from '../game/bossArt';
 import { BOSSES, BossApi, ShotOpts } from '../game/bosses';
 import { LEVELS, LevelDef, SpeakerId, computeStars } from '../game/campaign';
-import {
-  BossEntity,
-  BossKind,
-  BulletEntity,
-  FloatingTextEntity,
-  GameMode,
-  GameState,
-  GemEntity,
-  HazardEntity,
-  LaserEntity,
-  ParticleEntity,
-  PowerupEntity,
-  QuestType,
-  SaveData,
-  ShipDef,
-  ShockwaveEntity,
-  StarEntity,
-} from '../types/game';
+import { EngineState, createEngineState, fieldScale } from '../game/engine';
+import { HudSnapshot, HudStore, createHudStore } from '../game/hudStore';
+import { renderScene } from '../game/scene';
+import { BossEntity, BossKind, GameMode, GameState, QuestType, SaveData, ShipDef } from '../types/game';
 import { sound } from '../utils/audio';
-import { MAX_WEAPON_LEVEL, QUESTS, SHIPS } from '../utils/constants';
+import { DASH_COACH_SMASHES, MAX_WEAPON_LEVEL, QUESTS, SHIPS } from '../utils/constants';
 import { loadGameSave, saveGameData } from '../utils/storage';
 import { AchievementsModal } from './AchievementsModal';
 import { CampaignMap } from './CampaignMap';
@@ -56,6 +29,38 @@ const bossReady = (b: BossEntity) => b.entered && b.timeLeft > 0;
 
 /** Raises the auto-blaster's Weapon Power by one level (lost again when a shield breaks). */
 const POWER_PICKUP = { kind: 'power' as const, color: '#fb923c', label: 'WEAPON POWER' };
+
+/** Endless/Timed speed stops ramping here; later waves get denser instead of faster. */
+const SPEED_CAP_WAVE = 9;
+
+/** Dash recharge time for a ship, after Dash Thruster upgrades. */
+const dashCooldownFor = (ship: ShipDef, save: SaveData) =>
+  Math.max(0.8, 2.2 * (1 - (save.upgrades.dashCd || 0) * 0.1) * ship.stats.dashCd);
+
+type LiveHUDProps = Omit<React.ComponentProps<typeof HUD>, keyof HudSnapshot> & { store: HudStore };
+
+/** Subscribes to the loop's HUD snapshots so only the HUD re-renders on every sync. */
+const LiveHUD: React.FC<LiveHUDProps> = ({ store, ...rest }) => {
+  const snap = useSyncExternalStore(store.subscribe, store.get);
+  return <HUD {...rest} {...snap} />;
+};
+
+const findTouch = (list: React.TouchList, id: number): React.Touch | null => {
+  if (id < 0) return null;
+  for (let i = 0; i < list.length; i++) if (list[i].identifier === id) return list[i];
+  return null;
+};
+
+/** Lifetime stats a run adds to the save, whether it ended, cleared a sector or was abandoned. */
+const withRunTotals = (cur: SaveData, e: EngineState): SaveData => ({
+  ...cur,
+  bestCombo: Math.max(cur.bestCombo, e.maxComboThisRun),
+  bestFeverInRun: Math.max(cur.bestFeverInRun, e.feverCountThisRun),
+  totalNearMisses: cur.totalNearMisses + e.nearMissesThisRun,
+  totalDashSmashes: cur.totalDashSmashes + e.dashSmashesThisRun,
+  totalBossKills: cur.totalBossKills + e.bossKillsThisRun,
+  questProgress: e.questProgress,
+});
 
 export const NeonGame: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -86,26 +91,32 @@ export const NeonGame: React.FC = () => {
   const [isAchievementsOpen, setIsAchievementsOpen] = useState(false);
   const [isCampaignOpen, setIsCampaignOpen] = useState(false);
 
-  // In-Game Live Metrics for React HUD (throttled sync)
-  const [hudScore, setHudScore] = useState(0);
-  const [hudCombo, setHudCombo] = useState(1);
-  const [hudComboTimer, setHudComboTimer] = useState(0);
-  const [hudWave, setHudWave] = useState(1);
-  const [hudShards, setHudShards] = useState(saveData.shards);
-  const [hudTimedRemain, setHudTimedRemain] = useState(60.0);
-  const [hudFeverEnergy, setHudFeverEnergy] = useState(0);
-  const [hudIsFeverActive, setHudIsFeverActive] = useState(false);
-  const [hudShieldCount, setHudShieldCount] = useState(0);
-  const [hudMagnetTimer, setHudMagnetTimer] = useState(0);
-  const [hudSlowFieldTimer, setHudSlowFieldTimer] = useState(0);
-  const [hudEmpBombs, setHudEmpBombs] = useState(1);
-  const [hudWeaponLevel, setHudWeaponLevel] = useState(1);
-  const [hudDashCooldown, setHudDashCooldown] = useState(0);
-  const [hudDashMaxCooldown, setHudDashMaxCooldown] = useState(2.2);
-  const [hudBossHp, setHudBossHp] = useState(-1);
-  const [hudBossName, setHudBossName] = useState('');
-  const [hudBossStatus, setHudBossStatus] = useState('');
-  const [hudStageProgress, setHudStageProgress] = useState(-1);
+  // In-game live metrics: the loop publishes snapshots to this store (throttled), only <LiveHUD> re-renders
+  const [hudStore] = useState(() =>
+    createHudStore({
+      score: 0,
+      combo: 1,
+      comboTimer: 0,
+      shards: saveData.shards,
+      waveLevel: 1,
+      timedRemaining: 60.0,
+      feverEnergy: 0,
+      isFeverActive: false,
+      shieldCount: 0,
+      magnetTimer: 0,
+      slowFieldTimer: 0,
+      empBombs: 1,
+      weaponLevel: 1,
+      dashCooldown: 0,
+      dashMaxCooldown: 2.2,
+      dashHint: false,
+      bossHp: -1,
+      bossName: '',
+      bossStatus: '',
+      stageProgress: -1,
+      questProgress: saveData.questProgress,
+    })
+  );
   const [hudComm, setHudComm] = useState<CommMessage | null>(null);
 
   // Banner & Toast feedback
@@ -243,15 +254,21 @@ export const NeonGame: React.FC = () => {
   // Quest Tracker & Progression
   const currentQuest = QUESTS[saveData.questIndex % QUESTS.length];
 
+  /**
+   * Called from the 60FPS loop, so progress lives in the engine and only touches
+   * React state / localStorage when a quest completes (or the run ends).
+   */
   const advanceQuest = useCallback(
     (type: QuestType, amount: number, isAbsolute = false) => {
+      const e = engineRef.current;
       const cur = saveDataRef.current;
       const q = QUESTS[cur.questIndex % QUESTS.length];
       if (q.type !== type) return;
 
-      const newProg = isAbsolute ? Math.max(cur.questProgress, amount) : cur.questProgress + amount;
-      if (newProg === cur.questProgress) return;
+      const newProg = isAbsolute ? Math.max(e.questProgress, amount) : e.questProgress + amount;
+      if (newProg === e.questProgress) return;
       if (newProg >= q.target) {
+        e.questProgress = 0;
         updateSave({
           ...cur,
           shards: cur.shards + q.reward,
@@ -261,7 +278,7 @@ export const NeonGame: React.FC = () => {
         sound.playSound('powerup');
         showToast(`Mission complete: ${q.label}! +${q.reward} shards`);
       } else {
-        updateSave({ ...cur, questProgress: newProg });
+        e.questProgress = newProg;
       }
     },
     [updateSave, showToast]
@@ -270,108 +287,7 @@ export const NeonGame: React.FC = () => {
   // ========================================================
   // ENGINE DATA (mutated inside the 60FPS animation loop)
   // ========================================================
-  const engineRef = useRef({
-    W: window.innerWidth,
-    H: window.innerHeight,
-    dpr: Math.min(window.devicePixelRatio || 1, 2),
-    t: 0,
-
-    // Run metrics
-    score: 0,
-    combo: 1,
-    maxComboThisRun: 1,
-    comboDecayTimer: 0,
-    comboDecayMax: 3,
-    nearMissesThisRun: 0,
-    runShardsEarned: 0,
-    elapsedRunTime: 0,
-    timedRemaining: 60.0,
-    waveLevel: 1,
-    screenShake: 0,
-    slowMoFactor: 1.0,
-    slowMoTimer: 0,
-    gridOffsetY: 0,
-    warp: 0,
-    flashAlpha: 0,
-    flashColor: '#ffffff',
-    grazeSoundCd: 0,
-    hitSoundCd: 0,
-
-    // Fever / Overdrive
-    feverEnergy: 0,
-    isFeverActive: false,
-    feverTimeLeft: 0,
-    feverCountThisRun: 0,
-
-    // Death sequence
-    isDying: false,
-    deathTimer: 0,
-
-    // Boss
-    boss: null as BossEntity | null,
-    bossCount: 0,
-    bossKillsThisRun: 0,
-    nextBossTime: 55,
-
-    // Campaign stage: fly through the sector, then fight its Warden
-    stagePhase: 'stage' as 'stage' | 'boss' | 'clear',
-    stageTimer: 0,
-    bossTime: 0,
-    hitsTaken: 0,
-    clearTimer: 0,
-
-    // Player entity
-    player: {
-      x: window.innerWidth / 2,
-      y: window.innerHeight * 0.75,
-      targetX: window.innerWidth / 2,
-      targetY: window.innerHeight * 0.75,
-      vx: 0,
-      vy: 0,
-      radius: 16,
-      trail: [] as { x: number; y: number; dash: boolean }[],
-      shieldCount: 0,
-      empBombs: 1,
-      magnetTimer: 0,
-      slowFieldTimer: 0,
-      dashTimer: 0,
-      dashCooldown: 0,
-      dashMaxCooldown: 2.2,
-      invulnTimer: 0,
-      autoFireTimer: 0,
-      /** Weapon Power 1..MAX_WEAPON_LEVEL: how many barrels the auto-blaster fires. */
-      weaponLevel: 1,
-      bossContactCd: 0,
-      angle: -Math.PI / 2,
-    },
-
-    // Entity collections
-    hazards: [] as HazardEntity[],
-    lasers: [] as LaserEntity[],
-    gems: [] as GemEntity[],
-    powerups: [] as PowerupEntity[],
-    bullets: [] as BulletEntity[],
-    particles: [] as ParticleEntity[],
-    shockwaves: [] as ShockwaveEntity[],
-    floatingTexts: [] as FloatingTextEntity[],
-    bgStars: [] as StarEntity[],
-
-    // Spawners
-    hazardTimer: 0.5,
-    gemTimer: 0.3,
-    powerupTimer: 6.0,
-    laserTimer: 8.0,
-    entityIdCounter: 1,
-
-    // Controls
-    pointerActive: false,
-    pointerStartX: 0,
-    pointerStartY: 0,
-    playerStartX: 0,
-    playerStartY: 0,
-    lastTapTime: 0,
-    keys: {} as Record<string, boolean>,
-  });
+  const engineRef = useRef<EngineState>(createEngineState());
 
   const getActiveShip = useCallback((): ShipDef => {
     const cur = saveDataRef.current;
@@ -462,9 +378,7 @@ export const NeonGame: React.FC = () => {
     if (e.isDying || e.player.dashCooldown > 0) return;
 
     e.player.dashTimer = 0.38;
-    const cdReduction = 1 - (saveDataRef.current.upgrades.dashCd || 0) * 0.1;
-    const ship = getActiveShip();
-    e.player.dashMaxCooldown = Math.max(0.8, 2.2 * cdReduction * ship.stats.dashCd);
+    e.player.dashMaxCooldown = dashCooldownFor(getActiveShip(), saveDataRef.current);
     e.player.dashCooldown = e.player.dashMaxCooldown;
     e.player.invulnTimer = Math.max(e.player.invulnTimer, 0.45);
     e.player.bossContactCd = 0;
@@ -476,7 +390,17 @@ export const NeonGame: React.FC = () => {
     addShockwave(e.player.x, e.player.y, '#22d3ee', 120);
     spawnParticles(e.player.x, e.player.y, '#22d3ee', 18, 260, true);
     addFloatingText(e.player.x, e.player.y - 26, 'HYPER DASH!', '#67e8f9', 16);
+    addFloatingText(e.player.x, e.player.y - 8, 'INVINCIBLE', '#cffafe', 10);
   }, [getActiveShip, spawnParticles, addFloatingText, addShockwave]);
+
+  /** Lifetime Dash smashes drive the in-run coaching; celebrate the very first one. */
+  const noteDashSmash = useCallback(() => {
+    const e = engineRef.current;
+    e.dashSmashesThisRun++;
+    if (saveDataRef.current.totalDashSmashes + e.dashSmashesThisRun === 1) {
+      showCenterBanner('DASH SMASH! NOTHING HURTS YOU MID-DASH', 'neon-glow-cyan');
+    }
+  }, [showCenterBanner]);
 
   const defeatBoss = useCallback(() => {
     const e = engineRef.current;
@@ -728,7 +652,8 @@ export const NeonGame: React.FC = () => {
   const spawnHazardWave = useCallback(() => {
     const e = engineRef.current;
     const wave = e.waveLevel;
-    const speedMult = (gameModeRef.current === 'hardcore' ? 1.34 : 1.0) + (wave - 1) * 0.1;
+    // Speed ramps until SPEED_CAP_WAVE; past that the spawner adds extra enemies instead (see the loop)
+    const speedMult = (gameModeRef.current === 'hardcore' ? 1.34 : 1.0) + (Math.min(wave, SPEED_CAP_WAVE) - 1) * 0.1;
     // Campaign sectors bias the roll towards their own enemy mix
     const mix = getLevel()?.mix;
     let roll = Math.random();
@@ -750,6 +675,11 @@ export const NeonGame: React.FC = () => {
         r -= w;
       }
     }
+    // Spawns come fieldScale() times more often on wide screens. Seekers and turrets go for the
+    // pilot wherever they appear, so keep them at phone frequency and fall back to drones/spinners
+    const scale = fieldScale(e.W);
+    const targeted = (roll >= 0.34 && roll < 0.58) || roll >= 0.86;
+    if (targeted && Math.random() > 1 / scale) roll = Math.random() < 0.6 ? 0.1 : 0.66;
 
     const pushDrone = (x: number, y: number, vx: number, vy: number, r: number, spin: number) => {
       e.hazards.push({
@@ -807,8 +737,8 @@ export const NeonGame: React.FC = () => {
         color: '#ec4899',
         grazed: false,
       });
-    } else if (roll < 0.86 && wave >= 2 && Math.random() < 0.55) {
-      // Wall of mines with a gap — thread the needle for a big shard
+    } else if (roll < 0.86 && wave >= 2 && Math.random() < 0.55 / scale) {
+      // Wall of mines with a gap — thread the needle for a big shard (spans the screen, so not width-scaled)
       const spacing = 46;
       const count = Math.floor((e.W - 40) / spacing);
       const gap = 1 + Math.floor(Math.random() * Math.max(1, count - 3));
@@ -951,13 +881,9 @@ export const NeonGame: React.FC = () => {
       const isNewRecord = !campaign && finalScore > previousBest;
 
       updateSave({
-        ...cur,
+        ...withRunTotals(cur, e),
         ...(campaign ? {} : { [bestKey]: Math.max(previousBest, finalScore) }),
-        bestCombo: Math.max(cur.bestCombo, e.maxComboThisRun),
-        bestFeverInRun: Math.max(cur.bestFeverInRun, e.feverCountThisRun),
         totalRuns: cur.totalRuns + 1,
-        totalNearMisses: cur.totalNearMisses + e.nearMissesThisRun,
-        totalBossKills: cur.totalBossKills + e.bossKillsThisRun,
         shards: cur.shards + e.runShardsEarned,
       });
 
@@ -1021,6 +947,37 @@ export const NeonGame: React.FC = () => {
     return true;
   }, [addShockwave, addFloatingText, spawnParticles, flashScreen, startDeath]);
 
+  /** Publishes the engine's live numbers to the HUD store. */
+  const syncHud = useCallback(() => {
+    const e = engineRef.current;
+    const p = e.player;
+    const level = getLevel();
+    const dashingOrFever = p.dashTimer > 0 || e.isFeverActive;
+    hudStore.set({
+      score: e.score,
+      combo: e.combo,
+      comboTimer: e.combo > 1 && !e.isFeverActive ? e.comboDecayTimer / e.comboDecayMax : 0,
+      shards: saveDataRef.current.shards + e.runShardsEarned,
+      waveLevel: e.waveLevel,
+      timedRemaining: e.timedRemaining,
+      feverEnergy: e.feverEnergy,
+      isFeverActive: e.isFeverActive,
+      shieldCount: p.shieldCount,
+      magnetTimer: p.magnetTimer,
+      slowFieldTimer: p.slowFieldTimer,
+      empBombs: p.empBombs,
+      weaponLevel: p.weaponLevel,
+      dashCooldown: p.dashCooldown,
+      dashMaxCooldown: p.dashMaxCooldown,
+      dashHint: e.dashHintHold > 0 && p.dashCooldown <= 0 && !dashingOrFever,
+      bossHp: e.boss ? Math.max(0, e.boss.hp / e.boss.maxHp) : -1,
+      bossName: e.boss ? e.boss.name : '',
+      bossStatus: e.boss && bossReady(e.boss) ? e.boss.status : '',
+      stageProgress: level && e.stagePhase === 'stage' ? Math.min(1, e.stageTimer / level.stageTime) : -1,
+      questProgress: e.questProgress,
+    });
+  }, [getLevel, hudStore]);
+
   /** Starts a run. In the campaign, `fromBoss` skips straight to the sector's Warden. */
   const startGame = useCallback((fromBoss = false) => {
     sound.ensureContext();
@@ -1037,7 +994,11 @@ export const NeonGame: React.FC = () => {
     e.maxComboThisRun = 1;
     e.comboDecayTimer = 0;
     e.nearMissesThisRun = 0;
+    e.dashSmashesThisRun = 0;
+    e.dashHintId = -1;
+    e.dashHintHold = 0;
     e.runShardsEarned = 0;
+    e.questProgress = saveDataRef.current.questProgress;
     e.elapsedRunTime = 0;
     e.timedRemaining = 60.0;
     e.waveLevel = 1;
@@ -1063,6 +1024,7 @@ export const NeonGame: React.FC = () => {
     e.bossTime = 0;
     e.hitsTaken = 0;
     e.clearTimer = 0;
+    e.skippedStage = !!level && fromBoss;
     if (level) e.waveLevel = level.wave;
 
     e.player.x = e.W / 2;
@@ -1083,7 +1045,7 @@ export const NeonGame: React.FC = () => {
     e.player.slowFieldTimer = 0;
     e.player.dashTimer = 0;
     e.player.dashCooldown = 0;
-    e.player.dashMaxCooldown = 2.2 * ship.stats.dashCd;
+    e.player.dashMaxCooldown = dashCooldownFor(ship, saveDataRef.current);
     e.player.invulnTimer = 1.0;
     e.player.bossContactCd = 0;
 
@@ -1104,6 +1066,8 @@ export const NeonGame: React.FC = () => {
     setGameState('PLAYING');
     gameStateRef.current = 'PLAYING';
     refreshMusic();
+    // Don't flash the previous run's numbers before the loop's first sync
+    syncHud();
 
     addShockwave(e.player.x, e.player.y, ship.color, 160, 4);
     showCenterBanner(
@@ -1116,7 +1080,7 @@ export const NeonGame: React.FC = () => {
         : 'DRAG TO FLY • DOUBLE-TAP TO DASH',
       'neon-glow-cyan'
     );
-  }, [getActiveShip, getLevel, showCenterBanner, refreshMusic, addShockwave, clearComms]);
+  }, [getActiveShip, getLevel, showCenterBanner, refreshMusic, addShockwave, clearComms, syncHud]);
 
   const togglePause = useCallback(() => {
     if (gameStateRef.current === 'PLAYING') {
@@ -1124,6 +1088,7 @@ export const NeonGame: React.FC = () => {
       setGameState('PAUSED');
       gameStateRef.current = 'PAUSED';
       engineRef.current.pointerActive = false;
+      engineRef.current.touchId = -1;
     } else if (gameStateRef.current === 'PAUSED') {
       setGameState('PLAYING');
       gameStateRef.current = 'PLAYING';
@@ -1156,6 +1121,22 @@ export const NeonGame: React.FC = () => {
     refreshMusic();
   }, [refreshMusic, clearWorld, clearComms]);
 
+  /** Quitting or restarting from the pause menu still banks the shards and stats earned so far. */
+  const bankAbandonedRun = useCallback(() => {
+    const st = gameStateRef.current;
+    if (st !== 'PLAYING' && st !== 'PAUSED') return;
+    const e = engineRef.current;
+    const cur = saveDataRef.current;
+    const banked = e.runShardsEarned;
+    updateSave({ ...withRunTotals(cur, e), shards: cur.shards + banked });
+    // Zero the run so nothing gets counted twice
+    e.runShardsEarned = 0;
+    e.nearMissesThisRun = 0;
+    e.dashSmashesThisRun = 0;
+    e.bossKillsThisRun = 0;
+    if (banked > 0) showToast(`+${banked} shards banked from that run`);
+  }, [updateSave, showToast]);
+
   // ========================================================
   // Campaign flow: map → briefing → sector → debrief → results
   // ========================================================
@@ -1181,7 +1162,7 @@ export const NeonGame: React.FC = () => {
     const e = engineRef.current;
     const level = LEVELS[levelIndexRef.current];
     const cur = saveDataRef.current;
-    const stars = computeStars(e.hitsTaken, e.bossTime, level.parTime);
+    const stars = computeStars(e.hitsTaken, e.bossTime, level.parTime, e.skippedStage);
     const prevStars = cur.campaignStars[level.id] || 0;
     const firstClear = prevStars === 0;
     const reward = firstClear ? level.reward : Math.round(level.reward * 0.25);
@@ -1189,15 +1170,11 @@ export const NeonGame: React.FC = () => {
     campaignStars[level.id] = Math.max(prevStars, stars);
 
     updateSave({
-      ...cur,
+      ...withRunTotals(cur, e),
       shards: cur.shards + e.runShardsEarned + reward,
       campaignStars,
       campaignUnlocked: Math.max(cur.campaignUnlocked, Math.min(LEVELS.length - 1, level.id + 1)),
-      bestCombo: Math.max(cur.bestCombo, e.maxComboThisRun),
-      bestFeverInRun: Math.max(cur.bestFeverInRun, e.feverCountThisRun),
       totalRuns: cur.totalRuns + 1,
-      totalNearMisses: cur.totalNearMisses + e.nearMissesThisRun,
-      totalBossKills: cur.totalBossKills + e.bossKillsThisRun,
     });
 
     setLevelClearStats({
@@ -1211,6 +1188,7 @@ export const NeonGame: React.FC = () => {
       hitsTaken: e.hitsTaken,
       bossTime: e.bossTime,
       parTime: level.parTime,
+      skippedStage: e.skippedStage,
     });
 
     clearWorld();
@@ -1230,13 +1208,25 @@ export const NeonGame: React.FC = () => {
     }
   }, [storyKind, startGame]);
 
-  // Auto-pause when the tab or app goes to the background
+  // Auto-pause when the tab or window goes to the background. Alt-Tab only fires `blur`, and the
+  // keyup for any held key never arrives, so drop all input too or the ship drifts on return.
   useEffect(() => {
+    const releaseInput = () => {
+      const e = engineRef.current;
+      e.keys = {};
+      e.pointerActive = false;
+      e.touchId = -1;
+      if (gameStateRef.current === 'PLAYING') togglePause();
+    };
     const onVis = () => {
-      if (document.hidden && gameStateRef.current === 'PLAYING') togglePause();
+      if (document.hidden) releaseInput();
     };
     document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
+    window.addEventListener('blur', releaseInput);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('blur', releaseInput);
+    };
   }, [togglePause]);
 
   // ========================================================
@@ -1469,6 +1459,27 @@ export const NeonGame: React.FC = () => {
 
       const isDashingOrFever = p.dashTimer > 0 || e.isFeverActive;
 
+      // Dash coach: until the pilot has landed a few smashes, point at the closest enemy worth dashing into
+      e.dashHintId = -1;
+      if (
+        alive &&
+        p.dashCooldown <= 0 &&
+        !isDashingOrFever &&
+        saveDataRef.current.totalDashSmashes + e.dashSmashesThisRun < DASH_COACH_SMASHES
+      ) {
+        let best = 190;
+        for (const h of e.hazards) {
+          if (h.type === 'shot' || h.reflected) continue;
+          const d = Math.hypot(p.x - h.x, p.y - h.y);
+          if (d < best) {
+            best = d;
+            e.dashHintId = h.id;
+          }
+        }
+      }
+      if (e.dashHintId >= 0) e.dashHintHold = 0.8;
+      else if (e.dashHintHold > 0) e.dashHintHold -= rawDt;
+
       // Movement
       if (alive) {
         const kbSpeed = 520 * ship.stats.speed * rawDt;
@@ -1493,11 +1504,13 @@ export const NeonGame: React.FC = () => {
         p.trail.unshift({ x: p.x, y: p.y, dash: isDashingOrFever });
         if (p.trail.length > 16) p.trail.pop();
 
-        // Auto-blaster: unlocked by combo x5 (lowered by Targeting AI), Overdrive, or a boss fight
+        // Auto-blaster: always on at a slow idle cadence; full rate from combo x5 (lowered by
+        // Targeting AI), during Overdrive, or in a boss fight
         const up = saveDataRef.current.upgrades;
         p.autoFireTimer -= rawDt;
-        if ((e.combo >= Math.max(1, 5 - (up.targeting || 0)) || e.isFeverActive || e.boss) && p.autoFireTimer <= 0) {
-          const interval = e.isFeverActive ? 0.11 : e.boss ? (e.combo >= 10 ? 0.12 : 0.15) : 0.24;
+        if (p.autoFireTimer <= 0) {
+          const fullRate = e.combo >= Math.max(1, 5 - (up.targeting || 0));
+          const interval = e.isFeverActive ? 0.11 : e.boss ? (e.combo >= 10 ? 0.12 : 0.15) : fullRate ? 0.24 : 0.42;
           p.autoFireTimer = interval / (1 + (up.fireRate || 0) * 0.08);
           const color = e.isFeverActive ? '#fbbf24' : ship.color;
           const fever = e.isFeverActive;
@@ -1614,17 +1627,22 @@ export const NeonGame: React.FC = () => {
         const bossActive = !!e.boss;
         // Campaign Wardens get the stage to themselves (mostly)
         const bossSpawnMult = level ? 3.5 : 2.4;
+        // Wide screens spawn proportionally more often so density matches a phone
+        const scale = fieldScale(e.W);
         e.hazardTimer -= worldDt;
         if (e.hazardTimer <= 0) {
           spawnHazardWave();
+          // Past the speed cap, Endless keeps escalating with extra enemies rather than faster ones
+          const overflow = Math.max(0, e.waveLevel - SPEED_CAP_WAVE);
+          if (overflow > 0 && Math.random() < Math.min(0.45, overflow * 0.05)) spawnHazardWave();
           const baseInterval = Math.max(0.25, 0.76 - e.waveLevel * 0.045);
-          e.hazardTimer = baseInterval * (hard ? 0.78 : 1) * (bossActive ? bossSpawnMult : 1);
+          e.hazardTimer = (baseInterval * (hard ? 0.78 : 1) * (bossActive ? bossSpawnMult : 1)) / scale;
         }
 
         e.gemTimer -= worldDt;
         if (e.gemTimer <= 0) {
           spawnGemCluster();
-          e.gemTimer = 1.6;
+          e.gemTimer = 1.6 / scale;
         }
 
         e.powerupTimer -= rawDt;
@@ -1930,6 +1948,7 @@ export const NeonGame: React.FC = () => {
           addFeverEnergy(20);
           addFloatingText(p.x, p.y - 26, `PARRY! +${pts}`, '#67e8f9', 17);
           advanceQuest('dashkill', 1, false);
+          noteDashSmash();
           continue;
         }
 
@@ -1958,14 +1977,18 @@ export const NeonGame: React.FC = () => {
                 if (h.type === 'turret') dropPower(h.x, h.y);
                 advanceQuest('dashkill', 1, false);
                 advanceQuest('combo', e.combo, true);
+                noteDashSmash();
               }
               e.hazards.splice(i, 1);
               continue;
             }
-            const invuln = p.invulnTimer > 0;
-            e.hazards.splice(i, 1);
-            if (!invuln && hitPlayer()) break;
-            continue;
+            // While invulnerable (spawn, post-shield, victory lap) enemies just pass through
+            if (p.invulnTimer <= 0) {
+              e.hazards.splice(i, 1);
+              if (hitPlayer()) break;
+              continue;
+            }
+            h.grazed = true; // no near-miss credit for something that went straight through you
           } else if (!h.grazed && dist < hitRadius + (isShot ? grazeBonus * 0.7 : grazeBonus)) {
             h.grazed = true;
             if (isShot) {
@@ -2013,25 +2036,7 @@ export const NeonGame: React.FC = () => {
       // HUD throttle sync
       hudSyncCounter++;
       if (hudSyncCounter % 4 === 0) {
-        setHudScore(e.score);
-        setHudCombo(e.combo);
-        setHudComboTimer(e.combo > 1 && !e.isFeverActive ? e.comboDecayTimer / e.comboDecayMax : 0);
-        setHudWave(e.waveLevel);
-        setHudShards(saveDataRef.current.shards + e.runShardsEarned);
-        setHudTimedRemain(e.timedRemaining);
-        setHudFeverEnergy(e.feverEnergy);
-        setHudIsFeverActive(e.isFeverActive);
-        setHudShieldCount(p.shieldCount);
-        setHudMagnetTimer(p.magnetTimer);
-        setHudSlowFieldTimer(p.slowFieldTimer);
-        setHudEmpBombs(p.empBombs);
-        setHudWeaponLevel(p.weaponLevel);
-        setHudDashCooldown(p.dashCooldown);
-        setHudDashMaxCooldown(p.dashMaxCooldown);
-        setHudBossHp(e.boss ? Math.max(0, e.boss.hp / e.boss.maxHp) : -1);
-        setHudBossName(e.boss ? e.boss.name : '');
-        setHudBossStatus(e.boss && bossReady(e.boss) ? e.boss.status : '');
-        setHudStageProgress(level && e.stagePhase === 'stage' ? Math.min(1, e.stageTimer / level.stageTime) : -1);
+        syncHud();
       }
     };
 
@@ -2093,195 +2098,8 @@ export const NeonGame: React.FC = () => {
 
     // ---------- Rendering ----------
     const render = () => {
-      const e = engineRef.current;
-      const p = e.player;
-      const t = e.t;
-      const W = e.W;
-      const H = e.H;
       const st = gameStateRef.current;
-      const lvl = st === 'MENU' ? null : getLevel();
-
-      drawBackground(
-        ctx,
-        W,
-        H,
-        t,
-        e.gridOffsetY,
-        e.bgStars,
-        e.isFeverActive && st === 'PLAYING',
-        !!e.boss,
-        e.warp,
-        lvl?.theme
-      );
-
-      ctx.save();
-      if (e.screenShake > 0) {
-        ctx.translate((Math.random() - 0.5) * e.screenShake, (Math.random() - 0.5) * e.screenShake);
-      }
-
-      if (p.slowFieldTimer > 0 && st === 'PLAYING') {
-        ctx.fillStyle = 'rgba(52, 211, 153, 0.05)';
-        ctx.fillRect(0, 0, W, H);
-      }
-
-      for (const l of e.lasers) drawLaser(ctx, l, W, H, t);
-
-      // Shockwaves
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      for (const sw of e.shockwaves) {
-        ctx.strokeStyle = sw.color;
-        ctx.globalAlpha = Math.max(0, sw.alpha);
-        ctx.lineWidth = (sw.width || 3) * (0.4 + sw.alpha);
-        ctx.beginPath();
-        ctx.arc(sw.x, sw.y, sw.r, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.restore();
-
-      for (const g of e.gems) drawGem(ctx, g, t);
-      for (const pu of e.powerups) drawPowerup(ctx, pu, t);
-
-      // Player bullets
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      for (const b of e.bullets) {
-        drawGlow(ctx, b.x, b.y, 12, b.color, 0.6);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(b.x - 1.5, b.y - 9, 3, 14);
-      }
-      ctx.restore();
-
-      for (const h of e.hazards) if (h.type !== 'shot') drawHazard(ctx, h, t, p.x, p.y);
-      if (e.boss) drawBossEntity(ctx, e.boss, t, p.x, p.y, W);
-      for (const h of e.hazards) if (h.type === 'shot') drawHazard(ctx, h, t, p.x, p.y);
-
-      // Player
-      if ((st === 'PLAYING' || st === 'PAUSED') && !e.isDying) {
-        const ship = getActiveShip();
-        const mainColor = e.isFeverActive ? '#fbbf24' : ship.color;
-
-        // Afterglow trail
-        for (let i = p.trail.length - 1; i >= 1; i--) {
-          const tr = p.trail[i];
-          const ratio = 1 - i / p.trail.length;
-          drawGlow(ctx, tr.x, tr.y + 6, p.radius * (0.6 + ratio * 0.9), tr.dash ? '#f43f5e' : mainColor, ratio * 0.45);
-        }
-
-        // Magnet field ring
-        if (p.magnetTimer > 0) {
-          ctx.save();
-          ctx.strokeStyle = 'rgba(192, 132, 252, 0.55)';
-          ctx.setLineDash([4, 8]);
-          ctx.lineDashOffset = -t * 40;
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.radius + 24 + Math.sin(t * 6) * 3, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.restore();
-        }
-
-        const blinking = p.invulnTimer > 0 && p.dashTimer <= 0 && !e.isFeverActive;
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        if (blinking && Math.sin(t * 40) < 0) ctx.globalAlpha = 0.35;
-
-        // Overdrive aura
-        if (e.isFeverActive) {
-          drawGlow(ctx, 0, 0, p.radius * 3.5, '#fbbf24', 0.55);
-          ctx.save();
-          ctx.rotate(t * 5);
-          ctx.strokeStyle = '#fde047';
-          ctx.lineWidth = 2.5;
-          for (let k = 0; k < 2; k++) {
-            ctx.beginPath();
-            ctx.arc(0, 0, p.radius + 12, k * Math.PI, k * Math.PI + Math.PI * 0.6);
-            ctx.stroke();
-          }
-          ctx.restore();
-        } else if (p.dashTimer > 0) {
-          drawGlow(ctx, 0, 0, p.radius * 3, '#22d3ee', 0.6);
-        }
-
-        // Shield bubble
-        if (p.shieldCount > 0) {
-          ctx.save();
-          ctx.rotate(t * 0.8);
-          ctx.beginPath();
-          const sr = p.radius + 10;
-          for (let k = 0; k < 6; k++) {
-            const a = (k / 6) * Math.PI * 2;
-            if (k === 0) ctx.moveTo(Math.cos(a) * sr, Math.sin(a) * sr);
-            else ctx.lineTo(Math.cos(a) * sr, Math.sin(a) * sr);
-          }
-          ctx.closePath();
-          ctx.fillStyle = 'rgba(56, 189, 248, 0.12)';
-          ctx.fill();
-          ctx.strokeStyle = `rgba(125, 211, 252, ${0.6 + Math.sin(t * 5) * 0.25})`;
-          ctx.lineWidth = 2;
-          ctx.stroke();
-          ctx.restore();
-        }
-
-        ctx.rotate(p.angle + Math.PI / 2);
-        const thrust = p.dashTimer > 0 ? 2 : e.isFeverActive ? 1.6 : 1 + Math.max(0, -p.vy) * 0.002;
-        drawShip(
-          ctx,
-          ship.id,
-          p.radius,
-          mainColor,
-          e.isFeverActive ? '#b45309' : ship.secondary,
-          t,
-          thrust
-        );
-        ctx.restore();
-      }
-
-      // Particles
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.lineCap = 'round';
-      for (const pt of e.particles) {
-        const a = Math.max(0, pt.alpha);
-        if (pt.streak) {
-          ctx.strokeStyle = hexToRgba(pt.color, a);
-          ctx.lineWidth = pt.r * 0.8;
-          ctx.beginPath();
-          ctx.moveTo(pt.x, pt.y);
-          ctx.lineTo(pt.x - pt.vx * 0.045, pt.y - pt.vy * 0.045);
-          ctx.stroke();
-        } else {
-          drawGlow(ctx, pt.x, pt.y, pt.r * 3.2, pt.color, a);
-        }
-      }
-      ctx.restore();
-
-      if (lvl?.fog && (st === 'PLAYING' || st === 'PAUSED')) drawFog(ctx, W, H, p.x, p.y, 240, t);
-
-      // Floating texts with a pop-in scale
-      ctx.save();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.lineJoin = 'round';
-      for (const ft of e.floatingTexts) {
-        const pop = 1 + Math.max(0, 1 - ft.age * 7) * 0.5;
-        ctx.globalAlpha = Math.max(0, ft.alpha);
-        ctx.font = `700 ${Math.round(ft.size * pop)}px 'Orbitron', 'Rajdhani', system-ui, sans-serif`;
-        ctx.strokeStyle = 'rgba(2, 6, 23, 0.85)';
-        ctx.lineWidth = 4;
-        ctx.strokeText(ft.text, ft.x, ft.y);
-        ctx.fillStyle = ft.color;
-        ctx.fillText(ft.text, ft.x, ft.y);
-      }
-      ctx.restore();
-
-      ctx.restore();
-
-      if (e.flashAlpha > 0) {
-        ctx.fillStyle = hexToRgba(e.flashColor, e.flashAlpha * 0.6);
-        ctx.fillRect(0, 0, W, H);
-      }
-      drawVignette(ctx, W, H);
+      renderScene(ctx, engineRef.current, st, st === 'MENU' ? null : getLevel(), getActiveShip());
     };
 
     const loop = (now: number) => {
@@ -2328,17 +2146,23 @@ export const NeonGame: React.FC = () => {
     showCenterBanner,
     showComm,
     refreshMusic,
+    noteDashSmash,
+    syncHud,
   ]);
 
   // ========================================================
   // TOUCH & POINTER GESTURES
   // ========================================================
+  /** `touchId` is the finger's identifier, or -1 for the mouse. */
   const onPointerDown = useCallback(
-    (clientX: number, clientY: number) => {
+    (clientX: number, clientY: number, touchId = -1) => {
       sound.ensureContext();
       if (gameStateRef.current !== 'PLAYING') return;
 
       const e = engineRef.current;
+      // Only the first finger steers: extra fingers neither re-anchor the drag nor count as Dash taps
+      if (touchId >= 0 && e.touchId >= 0) return;
+      e.touchId = touchId;
       const now = performance.now();
       if (now - e.lastTapTime < 260) triggerDash();
       e.lastTapTime = now;
@@ -2364,7 +2188,19 @@ export const NeonGame: React.FC = () => {
 
   const onPointerUp = useCallback(() => {
     engineRef.current.pointerActive = false;
+    engineRef.current.touchId = -1;
   }, []);
+
+  const lastTouchRef = useRef(0);
+
+  /** Ends the drag only if the steering finger is among the touches that lifted. */
+  const onTouchRelease = useCallback(
+    (evt: React.TouchEvent) => {
+      lastTouchRef.current = performance.now();
+      if (findTouch(evt.changedTouches, engineRef.current.touchId)) onPointerUp();
+    },
+    [onPointerUp]
+  );
 
   // Keyboard handlers
   useEffect(() => {
@@ -2401,45 +2237,35 @@ export const NeonGame: React.FC = () => {
       <canvas
         ref={canvasRef}
         className="block w-full h-full cursor-crosshair touch-none"
-        onTouchStart={(e) => {
-          if (e.touches.length > 0) onPointerDown(e.touches[0].clientX, e.touches[0].clientY);
+        onTouchStart={(evt) => {
+          lastTouchRef.current = performance.now();
+          // A lone finger always takes over, so a lost touchend can never lock steering
+          if (evt.touches.length === 1) engineRef.current.touchId = -1;
+          const t = evt.changedTouches[0];
+          if (t) onPointerDown(t.clientX, t.clientY, t.identifier);
         }}
-        onTouchMove={(e) => {
-          if (e.touches.length > 0) onPointerMove(e.touches[0].clientX, e.touches[0].clientY);
+        onTouchMove={(evt) => {
+          const t = findTouch(evt.changedTouches, engineRef.current.touchId);
+          if (t) onPointerMove(t.clientX, t.clientY);
         }}
-        onTouchEnd={onPointerUp}
-        onMouseDown={(e) => onPointerDown(e.clientX, e.clientY)}
+        onTouchEnd={onTouchRelease}
+        onTouchCancel={onTouchRelease}
+        onMouseDown={(e) => {
+          // Skip the emulated mousedown a tap fires, or it counts as a second tap and Dashes
+          if (performance.now() - lastTouchRef.current > 800) onPointerDown(e.clientX, e.clientY);
+        }}
         onMouseMove={(e) => onPointerMove(e.clientX, e.clientY)}
         onMouseUp={onPointerUp}
         onMouseLeave={onPointerUp}
       />
 
       {gameState === 'PLAYING' && (
-        <HUD
-          score={hudScore}
-          combo={hudCombo}
-          comboTimer={hudComboTimer}
-          shards={hudShards}
-          waveLevel={hudWave}
+        <LiveHUD
+          store={hudStore}
           gameMode={gameMode}
-          timedRemaining={hudTimedRemain}
-          feverEnergy={hudFeverEnergy}
-          isFeverActive={hudIsFeverActive}
-          shieldCount={hudShieldCount}
-          magnetTimer={hudMagnetTimer}
-          slowFieldTimer={hudSlowFieldTimer}
-          empBombs={hudEmpBombs}
-          weaponLevel={hudWeaponLevel}
-          dashCooldown={hudDashCooldown}
-          dashMaxCooldown={hudDashMaxCooldown}
-          bossHp={hudBossHp}
-          bossName={hudBossName}
-          bossStatus={hudBossStatus}
-          stageProgress={hudStageProgress}
           level={gameMode === 'campaign' ? LEVELS[levelIndex] : null}
           comm={hudComm}
           currentQuest={currentQuest}
-          questProgress={saveData.questProgress}
           centerBannerText={centerBannerText}
           isBannerVisible={isBannerVisible}
           bannerColorClass={bannerColorClass}
@@ -2483,8 +2309,14 @@ export const NeonGame: React.FC = () => {
       <PauseModal
         isOpen={gameState === 'PAUSED'}
         onResume={togglePause}
-        onRestart={() => startGame(false)}
-        onMainMenu={returnToMainMenu}
+        onRestart={() => {
+          bankAbandonedRun();
+          startGame(false);
+        }}
+        onMainMenu={() => {
+          bankAbandonedRun();
+          returnToMainMenu();
+        }}
         isMuted={isMuted}
         isBgmMuted={isBgmMuted}
         onToggleMute={toggleMute}

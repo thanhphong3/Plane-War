@@ -328,9 +328,10 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** 1★ clear • 2★ no hits taken • 3★ also beat the boss under par time. */
-export function computeStars(hitsTaken: number, bossTime: number, parTime: number): number {
+/** `skippedStage`: a "Retry Boss" run skipped the flight, so the no-hit star can't be earned. */
+export function computeStars(hitsTaken: number, bossTime: number, parTime: number, skippedStage = false): number {
   let stars = 1;
-  if (hitsTaken === 0) stars++;
+  if (hitsTaken === 0 && !skippedStage) stars++;
   if (bossTime <= parTime) stars++;
   return stars;
 }

@@ -59,6 +59,8 @@ export interface SaveData {
   totalRuns: number;
   totalNearMisses: number;
   totalBossKills: number;
+  /** Lifetime enemies smashed or Plasma Cores parried with a Dash; drives in-run Dash coaching. */
+  totalDashSmashes: number;
   selectedShip: string;
   unlockedShips: string[];
   upgrades: {

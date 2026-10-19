@@ -742,6 +742,45 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
   ctx.restore();
 }
 
+/**
+ * Dash coach marker: cyan corner brackets locking onto an enemy plus a "DASH!" tag,
+ * so new pilots learn that this is something to ram, not just dodge.
+ * Plasma cores already carry their own "DASH INTO IT" cue.
+ */
+export function drawDashHint(ctx: Ctx, h: HazardEntity, t: number) {
+  if (h.type === 'orb') return;
+  const pulse = 0.5 + 0.5 * Math.sin(t * 9);
+  const s = h.r + 10 + pulse * 4;
+  const arm = Math.max(7, h.r * 0.5);
+  ctx.save();
+  ctx.translate(h.x, h.y);
+  ctx.strokeStyle = DASH_CUE;
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+  for (let k = 0; k < 4; k++) {
+    ctx.rotate(Math.PI / 2);
+    ctx.beginPath();
+    ctx.moveTo(-s, -s + arm);
+    ctx.lineTo(-s, -s);
+    ctx.lineTo(-s + arm, -s);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.font = "900 11px 'Orbitron', sans-serif";
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.globalAlpha = 0.75 + pulse * 0.25;
+  ctx.strokeStyle = 'rgba(2,6,23,0.9)';
+  ctx.lineWidth = 3;
+  ctx.strokeText('DASH!', h.x, h.y - s - 10);
+  ctx.fillStyle = DASH_CUE;
+  ctx.fillText('DASH!', h.x, h.y - s - 10);
+  ctx.restore();
+}
+
 export function drawLaser(ctx: Ctx, l: LaserEntity, W: number, H: number, t: number) {
   if (l.orient === 'h') {
     // Rotated frame: local (u, v) -> screen (v, row - u), so a column at u = 0

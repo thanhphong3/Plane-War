@@ -16,6 +16,8 @@ export interface LevelClearStats {
   hitsTaken: number;
   bossTime: number;
   parTime: number;
+  /** Started at the Warden via "Retry Boss": the no-hit star needs a full run. */
+  skippedStage: boolean;
 }
 
 interface LevelClearModalProps {
@@ -63,7 +65,11 @@ export const LevelClearModal: React.FC<LevelClearModalProps> = ({ isOpen, stats,
 
         <ul className="text-left space-y-1.5 bg-slate-900/80 border border-slate-800 rounded-2xl p-3">
           <Criterion ok label={`Defeat ${level.bossName}`} detail="Done" />
-          <Criterion ok={stats.hitsTaken === 0} label="Take no hits" detail={`${stats.hitsTaken} hit${stats.hitsTaken === 1 ? '' : 's'}`} />
+          <Criterion
+            ok={stats.hitsTaken === 0 && !stats.skippedStage}
+            label={stats.skippedStage ? 'Take no hits (full run only)' : 'Take no hits'}
+            detail={stats.skippedStage ? 'Boss retry' : `${stats.hitsTaken} hit${stats.hitsTaken === 1 ? '' : 's'}`}
+          />
           <Criterion
             ok={stats.bossTime <= stats.parTime}
             label={`Boss under ${stats.parTime}s`}
