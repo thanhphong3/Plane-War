@@ -1,6 +1,6 @@
 {
-  "name": "NEON BLITZ: Siêu Tốc Độ",
-  "description": "Trò chơi phản xạ phi thuyền neon siêu tốc độ gây nghiện với các kỹ năng lướt phá, né sát nút và cuồng nộ bất tử.",
+  "name": "NEON BLITZ: Hyper Speed",
+  "description": "An addictive hyper-speed neon starship reflex game with smash dashes, near-miss grazing, boss fights and invincible Overdrive.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

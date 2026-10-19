@@ -9,7 +9,6 @@ export interface ShipDef {
   secondary: string;
   cost: number;
   perk: string;
-  icon: string;
   stats: {
     speed: number;
     dashCd: number;
@@ -29,9 +28,11 @@ export interface UpgradeDef {
   icon: string;
 }
 
+export type QuestType = 'nearmiss' | 'combo' | 'dashkill' | 'gems' | 'fever' | 'boss';
+
 export interface QuestDef {
   id: string;
-  type: 'nearmiss' | 'combo' | 'dashkill' | 'gems' | 'fever';
+  type: QuestType;
   target: number;
   reward: number;
   label: string;
@@ -42,8 +43,8 @@ export interface AchievementDef {
   title: string;
   desc: string;
   icon: string;
-  unlocked: boolean;
   rewardShards: number;
+  isEligible: (save: SaveData) => boolean;
 }
 
 export interface SaveData {
@@ -52,8 +53,10 @@ export interface SaveData {
   bestTimed: number;
   bestHardcore: number;
   bestCombo: number;
+  bestFeverInRun: number;
   totalRuns: number;
   totalNearMisses: number;
+  totalBossKills: number;
   selectedShip: string;
   unlockedShips: string[];
   upgrades: {
@@ -71,7 +74,7 @@ export interface SaveData {
 
 export interface HazardEntity {
   id: number;
-  type: 'drone' | 'seeker' | 'spinner' | 'wave_splitter';
+  type: 'drone' | 'seeker' | 'spinner' | 'turret' | 'shot';
   x: number;
   y: number;
   vx: number;
@@ -81,8 +84,38 @@ export interface HazardEntity {
   spin?: number;
   speed?: number;
   life?: number;
+  hp?: number;
+  hitFlash?: number;
+  fireTimer?: number;
+  stopY?: number;
+  shotsLeft?: number;
   color: string;
   grazed: boolean;
+}
+
+export interface LaserEntity {
+  id: number;
+  x: number;
+  width: number;
+  warnTime: number;
+  fireTime: number;
+  grazed: boolean;
+}
+
+export interface BossEntity {
+  x: number;
+  y: number;
+  targetY: number;
+  r: number;
+  hp: number;
+  maxHp: number;
+  angle: number;
+  t: number;
+  attackTimer: number;
+  attackIndex: number;
+  hitFlash: number;
+  timeLeft: number;
+  level: number;
 }
 
 export interface GemEntity {
@@ -94,12 +127,14 @@ export interface GemEntity {
   r: number;
   val: number;
   magnetized: boolean;
+  spin: number;
 }
+
+export type PowerupKind = 'shield' | 'magnet' | 'slow' | 'bomb';
 
 export interface PowerupEntity {
   id: number;
-  kind: 'shield' | 'magnet' | 'slow' | 'bomb';
-  icon: string;
+  kind: PowerupKind;
   color: string;
   label: string;
   x: number;
@@ -113,6 +148,7 @@ export interface BulletEntity {
   id: number;
   x: number;
   y: number;
+  vx: number;
   vy: number;
   color: string;
 }
@@ -126,6 +162,7 @@ export interface ParticleEntity {
   color: string;
   alpha: number;
   decay: number;
+  streak?: boolean;
 }
 
 export interface ShockwaveEntity {
@@ -135,6 +172,7 @@ export interface ShockwaveEntity {
   maxR: number;
   color: string;
   alpha: number;
+  width?: number;
 }
 
 export interface FloatingTextEntity {
@@ -145,6 +183,7 @@ export interface FloatingTextEntity {
   color: string;
   size: number;
   alpha: number;
+  age: number;
 }
 
 export interface StarEntity {
@@ -153,4 +192,5 @@ export interface StarEntity {
   size: number;
   speed: number;
   alpha: number;
+  layer: number;
 }

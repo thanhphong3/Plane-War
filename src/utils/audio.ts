@@ -1,30 +1,55 @@
+export type SoundType =
+  | 'gem'
+  | 'nearmiss'
+  | 'dash'
+  | 'powerup'
+  | 'fever'
+  | 'boom'
+  | 'shield_break'
+  | 'gameover'
+  | 'click'
+  | 'hit'
+  | 'laser_warn'
+  | 'laser_fire'
+  | 'boss_alarm'
+  | 'boss_down'
+  | 'enemy_shot'
+  | 'wave';
+
+// A-minor synthwave progression: Am - F - C - G (one chord per bar)
+const BASS_ROOTS = [55, 43.65, 65.41, 49];
+const ARP_CHORDS = [
+  [440, 523.25, 659.25, 880],
+  [349.23, 440, 523.25, 698.46],
+  [392, 523.25, 659.25, 783.99],
+  [392, 493.88, 587.33, 783.99],
+];
+const BPM = 128;
+const STEP = 60 / BPM / 4; // 16th note
+
 class SoundManager {
   private ctx: AudioContext | null = null;
-  private bgmGain: GainNode | null = null;
-  private bgmOsc1: OscillatorNode | null = null;
-  private bgmOsc2: OscillatorNode | null = null;
-  private bgmFilter: BiquadFilterNode | null = null;
-  private isBgmPlaying = false;
-  private bgmIntervalId: number | null = null;
+  private master: GainNode | null = null;
+  private sfxBus: GainNode | null = null;
+  private bgmBus: GainNode | null = null;
+  private noise: AudioBuffer | null = null;
   private muted = false;
   private bgmMuted = false;
 
+  private wantBgm = false;
+  private schedulerId: number | null = null;
+  private nextStepTime = 0;
+  private step = 0;
+  private intensity = 1;
+
   public setMuted(muted: boolean) {
     this.muted = muted;
-    if (muted) {
-      this.stopBgm();
-    } else if (!this.bgmMuted && this.isBgmPlaying) {
-      this.startBgm();
-    }
+    this.applyBgmGain();
   }
 
   public setBgmMuted(bgmMuted: boolean) {
     this.bgmMuted = bgmMuted;
-    if (bgmMuted) {
-      this.stopBgm();
-    } else if (!this.muted) {
-      this.startBgm();
-    }
+    this.applyBgmGain();
   }
 
   public getMuted() {
@@ -35,16 +60,48 @@ class SoundManager {
     return this.bgmMuted;
   }
 
+  /** 0 = calm (menu), 1 = normal run, 2 = overdrive / boss */
+  public setIntensity(level: number) {
+    this.intensity = level;
+  }
+
+  private applyBgmGain() {
+    if (!this.ctx || !this.bgmBus) return;
+    const target = this.muted || this.bgmMuted ? 0 : 0.55;
+    this.bgmBus.gain.setTargetAtTime(target, this.ctx.currentTime, 0.08);
+  }
+
   public ensureContext(): AudioContext | null {
-    if (this.muted) return null;
     try {
       if (!this.ctx) {
-        const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        if (AudioContextClass) {
-          this.ctx = new AudioContextClass();
-        }
+        const AudioContextClass =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (!AudioContextClass) return null;
+        const ctx = new AudioContextClass();
+        const comp = ctx.createDynamicsCompressor();
+        comp.threshold.value = -14;
+        comp.ratio.value = 4;
+        this.master = ctx.createGain();
+        this.master.gain.value = 0.9;
+        this.sfxBus = ctx.createGain();
+        this.sfxBus.gain.value = 1;
+        this.bgmBus = ctx.createGain();
+        this.bgmBus.gain.value = 0;
+        this.sfxBus.connect(this.master);
+        this.bgmBus.connect(this.master);
+        this.master.connect(comp);
+        comp.connect(ctx.destination);
+
+        const len = Math.floor(ctx.sampleRate * 1.0);
+        this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
+        const data = this.noise.getChannelData(0);
+        for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+
+        this.ctx = ctx;
+        this.applyBgmGain();
       }
-      if (this.ctx && this.ctx.state === 'suspended') {
+      if (this.ctx.state === 'suspended') {
         this.ctx.resume();
       }
     } catch {
@@ -53,238 +110,269 @@ class SoundManager {
     return this.ctx;
   }
 
-  public playSound(
-    type: 'gem' | 'nearmiss' | 'dash' | 'powerup' | 'fever' | 'boom' | 'shield_break' | 'gameover' | 'click',
-    param: number = 1
+  private tone(
+    type: OscillatorType,
+    f0: number,
+    f1: number,
+    t: number,
+    dur: number,
+    vol: number,
+    dest: AudioNode
   ) {
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(f0, t);
+    if (f1 !== f0) osc.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    gain.gain.setValueAtTime(vol, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  }
+
+  private noiseBurst(
+    t: number,
+    dur: number,
+    vol: number,
+    filterType: BiquadFilterType,
+    freq: number,
+    dest: AudioNode,
+    freqEnd?: number
+  ) {
+    const ctx = this.ctx!;
+    if (!this.noise) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const filter = ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.setValueAtTime(freq, t);
+    if (freqEnd) filter.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(vol, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(dest);
+    src.start(t, Math.random() * 0.5);
+    src.stop(t + dur + 0.02);
+  }
+
+  public playSound(type: SoundType, param: number = 1) {
     if (this.muted) return;
     const ctx = this.ensureContext();
-    if (!ctx) return;
-
+    if (!ctx || !this.sfxBus) return;
+    const out = this.sfxBus;
     const now = ctx.currentTime;
+
     try {
       switch (type) {
-        case 'click': {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(800, now);
-          osc.frequency.exponentialRampToValueAtTime(400, now + 0.04);
-          gain.gain.setValueAtTime(0.08, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(now);
-          osc.stop(now + 0.045);
+        case 'click':
+          this.tone('sine', 900, 450, now, 0.05, 0.08, out);
           break;
-        }
 
         case 'gem': {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'sine';
-          // Pitch scales up with combo multiplier!
-          const baseFreq = Math.min(1450, 520 + Math.min(param, 30) * 32);
-          osc.frequency.setValueAtTime(baseFreq, now);
-          osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.5, now + 0.09);
-          gain.gain.setValueAtTime(0.13, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(now);
-          osc.stop(now + 0.1);
+          // Pitch climbs with the combo multiplier
+          const base = Math.min(1600, 520 + Math.min(param, 30) * 34);
+          this.tone('sine', base, base * 1.5, now, 0.1, 0.11, out);
+          this.tone('triangle', base * 2, base * 2.5, now + 0.02, 0.07, 0.04, out);
           break;
         }
 
-        case 'nearmiss': {
-          // Tension whoosh / cyber graze
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'triangle';
-          osc.frequency.setValueAtTime(280, now);
-          osc.frequency.exponentialRampToValueAtTime(1100, now + 0.15);
-          gain.gain.setValueAtTime(0.2, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(now);
-          osc.stop(now + 0.16);
+        case 'nearmiss':
+          this.tone('triangle', 300, 1300, now, 0.16, 0.18, out);
+          this.noiseBurst(now, 0.14, 0.12, 'bandpass', 2400, out, 6000);
           break;
-        }
 
-        case 'dash': {
-          // Deep punchy futuristic booster sweep
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(160, now);
-          osc.frequency.exponentialRampToValueAtTime(680, now + 0.19);
-          gain.gain.setValueAtTime(0.22, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(now);
-          osc.stop(now + 0.23);
+        case 'dash':
+          this.tone('sawtooth', 140, 760, now, 0.2, 0.16, out);
+          this.noiseBurst(now, 0.25, 0.22, 'highpass', 900, out, 4000);
           break;
-        }
 
-        case 'shield_break': {
-          const osc1 = ctx.createOscillator();
-          const osc2 = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc1.type = 'triangle';
-          osc2.type = 'sine';
-          osc1.frequency.setValueAtTime(900, now);
-          osc1.frequency.exponentialRampToValueAtTime(220, now + 0.22);
-          osc2.frequency.setValueAtTime(450, now);
-          osc2.frequency.exponentialRampToValueAtTime(110, now + 0.22);
-          gain.gain.setValueAtTime(0.25, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
-          osc1.connect(gain);
-          osc2.connect(gain);
-          gain.connect(ctx.destination);
-          osc1.start(now);
-          osc2.start(now);
-          osc1.stop(now + 0.25);
-          osc2.stop(now + 0.25);
+        case 'hit':
+          this.tone('square', 520, 160, now, 0.06, 0.05, out);
           break;
-        }
 
-        case 'powerup': {
-          const notes = [523.25, 659.25, 783.99, 1046.5];
-          notes.forEach((freq, i) => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'sine';
-            const t = now + i * 0.04;
-            osc.frequency.setValueAtTime(freq, t);
-            gain.gain.setValueAtTime(0.12, t);
-            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(t);
-            osc.stop(t + 0.17);
+        case 'enemy_shot':
+          this.tone('square', 880, 520, now, 0.07, 0.035, out);
+          break;
+
+        case 'shield_break':
+          this.tone('triangle', 1000, 220, now, 0.24, 0.22, out);
+          this.tone('sine', 500, 110, now, 0.24, 0.18, out);
+          this.noiseBurst(now, 0.3, 0.2, 'highpass', 3000, out, 800);
+          break;
+
+        case 'powerup':
+          [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+            this.tone('sine', f, f, now + i * 0.045, 0.16, 0.11, out);
           });
           break;
-        }
 
-        case 'fever': {
-          const feverNotes = [440, 554.37, 659.25, 880, 1108.7];
-          feverNotes.forEach((freq, i) => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'sawtooth';
-            const t = now + i * 0.05;
-            osc.frequency.setValueAtTime(freq, t);
-            gain.gain.setValueAtTime(0.16, t);
-            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(t);
-            osc.stop(t + 0.23);
+        case 'wave':
+          [392, 523.25, 783.99].forEach((f, i) => {
+            this.tone('triangle', f, f, now + i * 0.07, 0.22, 0.12, out);
           });
           break;
-        }
 
-        case 'boom': {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(140, now);
-          osc.frequency.exponentialRampToValueAtTime(32, now + 0.38);
-          gain.gain.setValueAtTime(0.28, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(now);
-          osc.stop(now + 0.41);
+        case 'fever':
+          [440, 554.37, 659.25, 880, 1108.7].forEach((f, i) => {
+            this.tone('sawtooth', f, f, now + i * 0.05, 0.22, 0.1, out);
+          });
+          this.noiseBurst(now, 0.6, 0.15, 'highpass', 1500, out, 8000);
           break;
-        }
 
-        case 'gameover': {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(220, now);
-          osc.frequency.exponentialRampToValueAtTime(45, now + 0.6);
-          gain.gain.setValueAtTime(0.3, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(now);
-          osc.stop(now + 0.66);
+        case 'boom':
+          this.tone('sine', 160, 35, now, 0.4, 0.4, out);
+          this.noiseBurst(now, 0.45, 0.35, 'lowpass', 2200, out, 120);
           break;
-        }
+
+        case 'boss_down':
+          this.tone('sine', 120, 25, now, 1.2, 0.5, out);
+          this.noiseBurst(now, 1.3, 0.45, 'lowpass', 3000, out, 80);
+          [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => {
+            this.tone('triangle', f, f, now + 0.35 + i * 0.07, 0.3, 0.1, out);
+          });
+          break;
+
+        case 'laser_warn':
+          this.tone('square', 1200, 1200, now, 0.06, 0.03, out);
+          this.tone('square', 1200, 1200, now + 0.12, 0.06, 0.03, out);
+          break;
+
+        case 'laser_fire':
+          this.tone('sawtooth', 90, 60, now, 0.45, 0.14, out);
+          this.noiseBurst(now, 0.4, 0.12, 'bandpass', 1800, out, 600);
+          break;
+
+        case 'boss_alarm':
+          for (let i = 0; i < 3; i++) {
+            this.tone('sawtooth', 440, 330, now + i * 0.38, 0.3, 0.12, out);
+          }
+          break;
+
+        case 'gameover':
+          this.tone('sawtooth', 240, 40, now, 0.9, 0.24, out);
+          this.noiseBurst(now, 0.8, 0.35, 'lowpass', 1800, out, 60);
+          break;
       }
     } catch {
       // Audio playback failsafe
     }
   }
 
-  /**
-   * Procedural Cyberpunk Synth Bassline
-   * Generates a rhythmic driving arpeggio with 120-135 BPM feel.
-   */
+  // ---------------------------------------------------------------------------
+  // Procedural synthwave soundtrack (lookahead step sequencer)
+  // ---------------------------------------------------------------------------
   public startBgm() {
-    if (this.muted || this.bgmMuted) return;
+    this.wantBgm = true;
     const ctx = this.ensureContext();
-    if (!ctx) return;
-
-    if (this.isBgmPlaying) return;
-    this.isBgmPlaying = true;
-
-    const bassNotes = [55, 55, 65.4, 55, 73.4, 55, 82.4, 73.4]; // A1 scale driving pulse
-    let step = 0;
-
-    const playBassStep = () => {
-      if (!this.isBgmPlaying || this.muted || this.bgmMuted || !this.ctx) return;
-      const now = this.ctx.currentTime;
-      const freq = bassNotes[step % bassNotes.length];
-      step++;
-
-      try {
-        const osc = this.ctx.createOscillator();
-        const filter = this.ctx.createBiquadFilter();
-        const gain = this.ctx.createGain();
-
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(freq, now);
-
-        filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(380, now);
-        filter.frequency.exponentialRampToValueAtTime(120, now + 0.16);
-
-        gain.gain.setValueAtTime(0.06, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-
-        osc.connect(filter);
-        filter.connect(gain);
-        gain.connect(this.ctx.destination);
-
-        osc.start(now);
-        osc.stop(now + 0.19);
-      } catch {
-        // Safe synth
-      }
-    };
-
-    if (this.bgmIntervalId) {
-      window.clearInterval(this.bgmIntervalId);
-    }
-    this.bgmIntervalId = window.setInterval(playBassStep, 175);
+    if (!ctx || this.schedulerId !== null) return;
+    this.nextStepTime = ctx.currentTime + 0.06;
+    this.step = 0;
+    this.schedulerId = window.setInterval(() => this.schedule(), 25);
   }
 
   public stopBgm() {
-    this.isBgmPlaying = false;
-    if (this.bgmIntervalId) {
-      window.clearInterval(this.bgmIntervalId);
-      this.bgmIntervalId = null;
+    this.wantBgm = false;
+    if (this.schedulerId !== null) {
+      window.clearInterval(this.schedulerId);
+      this.schedulerId = null;
+    }
+  }
+
+  private schedule() {
+    const ctx = this.ctx;
+    if (!ctx || !this.wantBgm) return;
+    // If the tab was suspended, skip ahead instead of bursting notes
+    if (this.nextStepTime < ctx.currentTime - 0.2) {
+      this.nextStepTime = ctx.currentTime + 0.05;
+    }
+    while (this.nextStepTime < ctx.currentTime + 0.12) {
+      if (!this.muted && !this.bgmMuted) this.playStep(this.step, this.nextStepTime);
+      this.nextStepTime += STEP;
+      this.step = (this.step + 1) % 64;
+    }
+  }
+
+  private playStep(step: number, t: number) {
+    const out = this.bgmBus!;
+    const bar = Math.floor(step / 16);
+    const s = step % 16;
+    const lvl = this.intensity;
+
+    try {
+      // Kick: four on the floor (half time when calm)
+      if (s % 4 === 0 && (lvl > 0 || s % 8 === 0)) {
+        this.tone('sine', 150, 42, t, 0.22, 0.55, out);
+      }
+      // Snare on 2 & 4
+      if (lvl > 0 && (s === 4 || s === 12)) {
+        this.noiseBurst(t, 0.16, 0.22, 'bandpass', 1900, out);
+        this.tone('triangle', 220, 160, t, 0.08, 0.12, out);
+      }
+      // Hats on offbeats (16ths in overdrive)
+      if (s % 4 === 2 || (lvl >= 2 && s % 2 === 1)) {
+        this.noiseBurst(t, 0.04, s % 4 === 2 ? 0.1 : 0.05, 'highpass', 7000, out);
+      }
+      // Bass: driving 8ths with octave pops
+      if (s % 2 === 0) {
+        const root = BASS_ROOTS[bar];
+        const f = s % 8 === 6 ? root * 2 : root;
+        const ctx = this.ctx!;
+        const osc = ctx.createOscillator();
+        const filter = ctx.createBiquadFilter();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(f, t);
+        filter.type = 'lowpass';
+        filter.Q.value = 6;
+        filter.frequency.setValueAtTime(lvl >= 2 ? 900 : 520, t);
+        filter.frequency.exponentialRampToValueAtTime(140, t + 0.18);
+        gain.gain.setValueAtTime(0.16, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(out);
+        osc.start(t);
+        osc.stop(t + 0.22);
+      }
+      // Arpeggio lead
+      if (lvl > 0) {
+        const chord = ARP_CHORDS[bar];
+        const pattern = [0, 1, 2, 3, 2, 1, 2, 3];
+        const note = chord[pattern[s % 8]] * (lvl >= 2 && s >= 8 ? 2 : 1);
+        this.tone('square', note, note, t, 0.09, lvl >= 2 ? 0.045 : 0.03, out);
+      }
+      // Pad swell at the start of each bar
+      if (s === 0) {
+        const chord = ARP_CHORDS[bar];
+        for (let i = 0; i < 3; i++) {
+          const ctx = this.ctx!;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(chord[i] / 2, t);
+          osc.detune.value = (i - 1) * 7;
+          gain.gain.setValueAtTime(0.001, t);
+          gain.gain.exponentialRampToValueAtTime(0.035, t + 0.4);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + STEP * 16);
+          osc.connect(gain);
+          gain.connect(out);
+          osc.start(t);
+          osc.stop(t + STEP * 16 + 0.05);
+        }
+      }
+    } catch {
+      // Safe synth
     }
   }
 
   public triggerHaptic(pattern: number | number[] = 20) {
     try {
-      if (typeof window !== 'undefined' && 'navigator' in window && typeof navigator.vibrate === 'function') {
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
         navigator.vibrate(pattern);
       }
     } catch {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { House, Music, Pause, Play, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 import { sound } from '../utils/audio';
 
 interface PauseModalProps {
@@ -25,37 +26,35 @@ export const PauseModal: React.FC<PauseModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="glass-panel w-full max-w-xs rounded-3xl p-6 text-center space-y-4 border border-cyan-500/30 shadow-2xl">
-        <div className="w-12 h-12 mx-auto rounded-2xl bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 flex items-center justify-center text-2xl">
-          ⏸️
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md anim-fade">
+      <div className="glass-panel w-full max-w-xs rounded-3xl p-6 text-center space-y-4 anim-pop panel-glow">
+        <div className="w-14 h-14 mx-auto rounded-2xl bg-cyan-500/15 border border-cyan-400/40 text-cyan-300 flex items-center justify-center">
+          <Pause size={26} />
         </div>
         <div>
-          <h2 className="text-2xl font-black text-white font-cyber tracking-wide">TẠM DỪNG</h2>
-          <p className="text-xs text-slate-300 mt-1">Thả lỏng ngón tay trước khi tiếp tục bứt tốc!</p>
+          <h2 className="text-2xl font-black text-white font-cyber tracking-[0.2em]">PAUSED</h2>
+          <p className="text-xs text-slate-400 mt-1">Shake out your fingers, pilot. The grid will wait.</p>
         </div>
 
-        {/* Audio controls */}
         <div className="grid grid-cols-2 gap-2 bg-slate-900/80 p-2 rounded-2xl border border-slate-800">
           <button
             type="button"
             onClick={onToggleMute}
             className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 btn-cyber border border-slate-700"
           >
-            <span>{isMuted ? '🔇' : '🔊'}</span>
-            <span>{isMuted ? 'Tắt Hiệu Ứng' : 'Bật Hiệu Ứng'}</span>
+            {isMuted ? <VolumeX size={14} className="text-rose-300" /> : <Volume2 size={14} />}
+            <span>{isMuted ? 'Sound Off' : 'Sound On'}</span>
           </button>
           <button
             type="button"
             onClick={onToggleBgm}
             className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 btn-cyber border border-slate-700"
           >
-            <span>{isBgmMuted ? '🎵❌' : '🎵'}</span>
-            <span>{isBgmMuted ? 'Tắt Nhạc' : 'Bật Nhạc'}</span>
+            <Music size={14} className={isBgmMuted ? 'opacity-40' : ''} />
+            <span>{isBgmMuted ? 'Music Off' : 'Music On'}</span>
           </button>
         </div>
 
-        {/* Actions */}
         <div className="space-y-2.5 pt-1">
           <button
             type="button"
@@ -63,9 +62,9 @@ export const PauseModal: React.FC<PauseModalProps> = ({
               sound.playSound('click');
               onResume();
             }}
-            className="w-full py-3 rounded-2xl bg-gradient-to-r from-cyan-400 to-cyan-500 text-slate-950 font-black text-sm uppercase font-cyber btn-cyber shadow-lg shadow-cyan-500/20"
+            className="w-full py-3 rounded-2xl bg-gradient-to-r from-cyan-300 to-cyan-500 text-slate-950 font-black text-sm uppercase font-cyber btn-cyber shadow-lg shadow-cyan-500/25 flex items-center justify-center gap-2"
           >
-            ▶ Tiếp Tục Bay
+            <Play size={16} fill="currentColor" /> Resume
           </button>
           <button
             type="button"
@@ -73,9 +72,9 @@ export const PauseModal: React.FC<PauseModalProps> = ({
               sound.playSound('click');
               onRestart();
             }}
-            className="w-full py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs uppercase font-cyber border border-slate-700 btn-cyber"
+            className="w-full py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs uppercase font-cyber border border-slate-700 btn-cyber flex items-center justify-center gap-2"
           >
-            🔄 Chơi Lại Ván Mới
+            <RotateCcw size={14} /> Restart
           </button>
           <button
             type="button"
@@ -83,9 +82,9 @@ export const PauseModal: React.FC<PauseModalProps> = ({
               sound.playSound('click');
               onMainMenu();
             }}
-            className="w-full py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 font-semibold text-xs border border-slate-800 btn-cyber"
+            className="w-full py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 font-semibold text-xs border border-slate-800 btn-cyber flex items-center justify-center gap-2"
           >
-            🏠 Về Sảnh Chính
+            <House size={14} /> Main Menu
           </button>
         </div>
       </div>
