@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Flame, Gem, Ghost, Repeat, Rocket, ShieldPlus, Sparkles, Sun, Zap } from 'lucide-react';
+import { Bomb, ChevronsUp, Crosshair, Flame, Gauge, Gem, Ghost, Repeat, Rocket, ShieldPlus, Skull, Sparkles, Sun, Zap } from 'lucide-react';
 import { tr, useLang } from '../i18n';
 import { localPerk } from '../i18n/content';
 import { PerkDef, PerkId } from '../types/game';
-import { PERKS } from '../utils/constants';
+import { PERKS, PERK_REWARDS } from '../utils/constants';
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>> = {
   zap: Zap,
@@ -14,9 +14,15 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   rocket: Rocket,
   gem: Gem,
   flame: Flame,
+  crosshair: Crosshair,
+  skull: Skull,
+  gauge: Gauge,
+  chevrons: ChevronsUp,
+  bomb: Bomb,
 };
 
-export const perkDef = (id: PerkId): PerkDef => localPerk(PERKS.find((p) => p.id === id) || PERKS[0]);
+export const perkDef = (id: PerkId): PerkDef =>
+  localPerk(PERKS.find((p) => p.id === id) || PERK_REWARDS.find((p) => p.id === id) || PERKS[0]);
 
 /** Lucide glyph for a perk (shared with the HUD). */
 export const PerkIcon: React.FC<{ id: PerkId; size?: number; className?: string; style?: React.CSSProperties }> = ({
@@ -33,6 +39,8 @@ interface PerkModalProps {
   isOpen: boolean;
   options: PerkId[];
   owned: PerkId[];
+  /** Level of each installed perk. */
+  levels: Partial<Record<PerkId, number>>;
   /** Small context line, e.g. "Wave 4 cleared" or "Boss 3/7 down". */
   subtitle: string;
   onPick: (id: PerkId) => void;
@@ -41,7 +49,7 @@ interface PerkModalProps {
 /** Ignore input for a moment so a Dash double-tap in flight can't pick a card by accident. */
 const ARM_DELAY_MS = 450;
 
-export const PerkModal: React.FC<PerkModalProps> = ({ isOpen, options, owned, subtitle, onPick }) => {
+export const PerkModal: React.FC<PerkModalProps> = ({ isOpen, options, owned, levels, subtitle, onPick }) => {
   useLang();
   const [armed, setArmed] = useState(false);
   const pickedRef = useRef(false);
@@ -83,12 +91,23 @@ export const PerkModal: React.FC<PerkModalProps> = ({ isOpen, options, owned, su
           {tr('Tactical Upgrade', 'Nâng Cấp Chiến Thuật')}
         </h2>
         <p className="text-xs text-slate-300 mt-1.5 text-center">
-          {tr('Pick one. It lasts for the rest of this run.', 'Chọn một. Hiệu lực đến hết lượt chơi này.')}
+          {tr(
+            'Pick one. It lasts for the rest of this run; picking one you own levels it up.',
+            'Chọn một. Hiệu lực đến hết lượt chơi; chọn lại cái đã có sẽ nâng cấp nó.'
+          )}
         </p>
 
         <div className="mt-5 w-full grid grid-cols-1 sm:grid-cols-3 gap-3">
           {options.map((id, i) => {
             const perk = perkDef(id);
+            const lvl = levels[id] || 0;
+            const tag = perk.reward
+              ? { text: tr('Supply drop', 'Tiếp tế'), cls: 'bg-sky-500/20 text-sky-200 border-sky-400/50' }
+              : perk.gambit
+              ? { text: tr('Gambit · risk', 'Canh bạc · rủi ro'), cls: 'bg-rose-500/20 text-rose-200 border-rose-400/60' }
+              : lvl > 0
+              ? { text: `LV ${lvl} → ${lvl + 1}`, cls: 'bg-amber-400/20 text-amber-200 border-amber-300/60' }
+              : { text: tr('New', 'Mới'), cls: 'bg-cyan-500/15 text-cyan-200 border-cyan-400/40' };
             return (
               <button
                 key={id}
@@ -113,10 +132,15 @@ export const PerkModal: React.FC<PerkModalProps> = ({ isOpen, options, owned, su
                   <PerkIcon id={id} size={26} style={{ color: perk.color }} />
                 </span>
                 <span className="min-w-0 flex-1 sm:flex-none">
-                  <span className="block text-sm sm:text-base font-black font-cyber uppercase tracking-wide" style={{ color: perk.color }}>
+                  <span className={`inline-block text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border font-cyber ${tag.cls}`}>
+                    {tag.text}
+                  </span>
+                  <span className="block text-sm sm:text-base font-black font-cyber uppercase tracking-wide mt-1" style={{ color: perk.color }}>
                     {perk.name}
                   </span>
-                  <span className="block text-xs text-slate-300 leading-snug mt-1">{perk.desc}</span>
+                  <span className="block text-xs text-slate-300 leading-snug mt-1">
+                    {lvl > 0 && perk.upgrade ? `${perk.upgrade}.` : perk.desc}
+                  </span>
                 </span>
                 <span className="hidden sm:flex mt-2 w-7 h-7 rounded-lg border border-slate-600 bg-slate-900 text-slate-300 text-xs font-black font-cyber items-center justify-center group-hover:border-white group-hover:text-white">
                   {i + 1}
@@ -135,10 +159,15 @@ export const PerkModal: React.FC<PerkModalProps> = ({ isOpen, options, owned, su
                 <span
                   key={id}
                   title={perk.name}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center border"
+                  className="relative w-7 h-7 rounded-lg flex items-center justify-center border"
                   style={{ borderColor: `${perk.color}66`, backgroundColor: `${perk.color}1a` }}
                 >
                   <PerkIcon id={id} size={14} style={{ color: perk.color }} />
+                  {(levels[id] || 0) > 1 && (
+                    <span className="absolute -bottom-1 -right-1 px-0.5 rounded bg-amber-300 text-slate-950 text-[8px] font-black leading-none">
+                      {levels[id]}
+                    </span>
+                  )}
                 </span>
               );
             })}

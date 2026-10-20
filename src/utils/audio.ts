@@ -22,7 +22,13 @@ export type SoundType =
   | 'comm'
   | 'perk_pick'
   | 'railgun'
-  | 'homing_launch';
+  | 'homing_launch'
+  | 'combo'
+  | 'elite_down'
+  | 'revive'
+  | 'snipe_lock'
+  | 'snipe'
+  | 'lunge';
 
 /** Soundtrack layers: cruising, boss fight, Overdrive. */
 export type BgmMode = 'normal' | 'boss' | 'fever';
@@ -84,6 +90,9 @@ class SoundManager {
   private noise: AudioBuffer | null = null;
   private muted = false;
   private bgmMuted = false;
+  private sfxVolume = 0.9;
+  private musicVolume = 0.8;
+  private haptics = true;
 
   private wantBgm = false;
   private schedulerId: number | null = null;
@@ -102,6 +111,18 @@ class SoundManager {
   public setBgmMuted(bgmMuted: boolean) {
     this.bgmMuted = bgmMuted;
     this.applyBgmGain();
+  }
+
+  /** 0..1 levels from the Settings screen. */
+  public setVolumes(sfx: number, music: number) {
+    this.sfxVolume = Math.max(0, Math.min(1, sfx));
+    this.musicVolume = Math.max(0, Math.min(1, music));
+    if (this.ctx && this.sfxBus) this.sfxBus.gain.setTargetAtTime(this.sfxVolume / 0.9, this.ctx.currentTime, 0.05);
+    this.applyBgmGain();
+  }
+
+  public setHaptics(on: boolean) {
+    this.haptics = on;
   }
 
   public getMuted() {
@@ -124,7 +145,7 @@ class SoundManager {
 
   private applyBgmGain() {
     if (!this.ctx || !this.bgmBus) return;
-    const target = this.muted || this.bgmMuted ? 0 : 0.55;
+    const target = this.muted || this.bgmMuted ? 0 : 0.55 * (this.musicVolume / 0.8);
     this.bgmBus.gain.setTargetAtTime(target, this.ctx.currentTime, 0.08);
   }
 
@@ -142,7 +163,7 @@ class SoundManager {
         this.master = ctx.createGain();
         this.master.gain.value = 0.9;
         this.sfxBus = ctx.createGain();
-        this.sfxBus.gain.value = 1;
+        this.sfxBus.gain.value = this.sfxVolume / 0.9;
         this.bgmBus = ctx.createGain();
         this.bgmBus.gain.value = 0;
         this.sfxBus.connect(this.master);
@@ -367,6 +388,46 @@ class SoundManager {
           this.tone('sine', 1320, 1320, now, 0.05, 0.05, out);
           this.tone('sine', 1760, 1760, now + 0.07, 0.06, 0.05, out);
           break;
+
+        case 'combo': {
+          // Combo milestone fanfare: a higher, longer chord for every tier (param = 1..3)
+          const tier = Math.max(1, Math.min(3, param));
+          const root = 392 * Math.pow(1.26, tier - 1);
+          [1, 1.26, 1.5, 2, 2.52].slice(0, 3 + tier - 1).forEach((k, i) => {
+            this.tone('sawtooth', root * k, root * k, now + i * 0.06, 0.32, 0.09, out);
+            this.tone('triangle', root * k * 2, root * k * 2.02, now + i * 0.06, 0.25, 0.05, out);
+          });
+          this.noiseBurst(now + 0.05, 0.5, 0.1, 'highpass', 5000, out, 11000);
+          break;
+        }
+
+        case 'elite_down':
+          this.tone('sine', 220, 40, now, 0.45, 0.4, out);
+          this.noiseBurst(now, 0.4, 0.3, 'lowpass', 2600, out, 150);
+          [784, 988, 1318.5].forEach((f, i) => this.tone('triangle', f, f, now + 0.08 + i * 0.05, 0.2, 0.09, out));
+          break;
+
+        case 'revive':
+          [261.63, 329.63, 392, 523.25, 659.25, 783.99].forEach((f, i) => {
+            this.tone('triangle', f, f * 1.01, now + i * 0.07, 0.4, 0.11, out);
+          });
+          this.tone('sine', 110, 440, now, 0.6, 0.2, out);
+          this.noiseBurst(now + 0.2, 0.7, 0.1, 'highpass', 3000, out, 10000);
+          break;
+
+        case 'snipe_lock':
+          this.tone('sine', 1800, 2400, now, 0.12, 0.05, out);
+          break;
+
+        case 'snipe':
+          this.tone('sawtooth', 1600, 200, now, 0.16, 0.08, out);
+          this.noiseBurst(now, 0.12, 0.1, 'highpass', 3500, out, 8000);
+          break;
+
+        case 'lunge':
+          this.tone('sawtooth', 180, 900, now, 0.25, 0.08, out);
+          this.noiseBurst(now, 0.3, 0.1, 'bandpass', 900, out, 3000);
+          break;
       }
     } catch {
       // Audio playback failsafe
@@ -510,6 +571,7 @@ class SoundManager {
   }
 
   public triggerHaptic(pattern: number | number[] = 20) {
+    if (!this.haptics) return;
     try {
       if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
         navigator.vibrate(pattern);

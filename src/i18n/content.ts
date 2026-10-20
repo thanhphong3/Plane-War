@@ -1,5 +1,5 @@
 import { DialogueLine, LevelDef } from '../game/campaign';
-import { AchievementDef, PerkDef, QuestDef, ShipDef, UpgradeDef } from '../types/game';
+import { AchievementDef, DailyModifierDef, PerkDef, QuestDef, ShipDef, UpgradeDef } from '../types/game';
 import { getLang } from './index';
 
 // ---------------------------------------------------------------------------
@@ -46,15 +46,21 @@ const UPGRADES_VI: Record<string, { name: string; desc: string }> = {
   primer: { name: 'Mồi Vũ Khí', desc: 'Bắt đầu mỗi lượt với +1 cấp Hỏa Lực' },
 };
 
-const PERKS_VI: Record<string, { name: string; desc: string }> = {
-  chain_dash: { name: 'Dư Chấn Tĩnh Điện', desc: 'Khi cú Lướt kết thúc, tia sét giật vào tối đa 3 kẻ địch gần đó.' },
-  graze_shield: { name: 'Tụ Điện Động Năng', desc: 'Mỗi 18 lần sượt đạn nạp +1 Khiên Năng Lượng (tối đa 3).' },
-  ricochet: { name: 'Nảy Lăng Kính', desc: 'Đạn của bạn nảy lại một lần khi chạm mép trái/phải màn hình.' },
-  dash_decoy: { name: 'Bóng Ảnh Holo', desc: 'Lướt để lại bóng ảnh hút đạn địch trong 2.5s rồi phát nổ.' },
-  overdrive_nova: { name: 'Lõi Siêu Tân Tinh', desc: 'Khi bật và khi kết thúc Quá Tải, xóa sạch đạn địch trên màn hình.' },
-  combo_missiles: { name: 'Giao Thức Bầy Đàn', desc: 'Từ combo x10 trở lên, cứ 1.8s phóng 2 tên lửa đuổi.' },
-  shard_frenzy: { name: 'Ép Xung Tham Lam', desc: 'Mỗi mảnh nhặt được hồi 0.15s Lướt và tăng +25% điểm.' },
-  berserk_barrel: { name: 'Nòng Quá Nạp', desc: '+35% tốc độ bắn và +25% sát thương khi không có khiên.' },
+const PERKS_VI: Record<string, { name: string; desc: string; upgrade?: string }> = {
+  chain_dash: { name: 'Dư Chấn Tĩnh Điện', desc: 'Khi cú Lướt kết thúc, tia sét giật vào tối đa 3 kẻ địch gần đó.', upgrade: '+2 mục tiêu, +1 sát thương, tầm xa hơn' },
+  graze_shield: { name: 'Tụ Điện Động Năng', desc: 'Mỗi 18 lần sượt đạn nạp +1 Khiên Năng Lượng (tối đa 3).', upgrade: 'Cần ít hơn 4 lần sượt cho mỗi khiên' },
+  ricochet: { name: 'Nảy Lăng Kính', desc: 'Đạn của bạn nảy lại một lần khi chạm mép trái/phải màn hình.', upgrade: '+1 lần nảy cho mỗi viên đạn' },
+  dash_decoy: { name: 'Bóng Ảnh Holo', desc: 'Lướt để lại bóng ảnh hút đạn địch trong 2.5s rồi phát nổ.', upgrade: 'Tồn tại lâu hơn, nổ rộng hơn' },
+  overdrive_nova: { name: 'Lõi Siêu Tân Tinh', desc: 'Khi bật và khi kết thúc Quá Tải, xóa sạch đạn địch trên màn hình.', upgrade: '+1.5s thời gian Quá Tải' },
+  combo_missiles: { name: 'Giao Thức Bầy Đàn', desc: 'Từ combo x10 trở lên, cứ 1.8s phóng 2 tên lửa đuổi.', upgrade: 'Kích hoạt sớm hơn 2 combo, bắn nhanh hơn' },
+  shard_frenzy: { name: 'Ép Xung Tham Lam', desc: 'Mỗi mảnh nhặt được hồi 0.15s Lướt và tăng +25% điểm.', upgrade: 'Hồi Lướt và thưởng điểm nhiều hơn' },
+  berserk_barrel: { name: 'Nòng Quá Nạp', desc: '+35% tốc độ bắn và +25% sát thương khi không có khiên.', upgrade: '+15% tốc độ bắn, +10% sát thương' },
+  glass_cannon: { name: 'Pháo Thủy Tinh', desc: '+60% sát thương đạn. Bạn không bao giờ giữ được quá 1 khiên.' },
+  bullet_hell: { name: 'Địa Ngục Đạn', desc: 'x1.5 điểm và +30% mảnh, nhưng đạn địch bay nhanh hơn 25%.' },
+  overclock_dash: { name: 'Động Cơ Ép Xung', desc: 'Lướt hồi nhanh hơn 40%, nhưng Quá Tải nạp chậm hơn 30%.' },
+  reward_shield: { name: 'Pin Khiên', desc: '+1 Khiên Năng Lượng ngay lập tức.' },
+  reward_power: { name: 'Kho Vũ Khí', desc: '+1 cấp Hỏa Lực (thưởng điểm lớn nếu đã tối đa).' },
+  reward_emp: { name: 'Thùng EMP', desc: '+2 Bom EMP.' },
 };
 
 const QUESTS_VI: Record<string, string> = {
@@ -64,8 +70,16 @@ const QUESTS_VI: Record<string, string> = {
   q4: 'Thu thập 30 Mảnh Neon',
   q5: 'Kích hoạt Quá Tải 1 lần',
   q6: 'Né sát 8 lần',
-  q7: 'Tiêu diệt một boss Lính Canh',
+  q7: 'Tiêu diệt một boss',
   q8: 'Đạt siêu combo x15',
+  q9: 'Tiêu diệt 3 kẻ địch tinh nhuệ',
+  q10: 'Đạt 15.000 điểm trong một lượt',
+  q11: 'Đạt Cấp 6 trong một lượt',
+  q12: 'Sượt qua 60 viên đạn địch',
+  q13: 'Lắp 4 Nâng Cấp Chiến Thuật',
+  q14: 'Chơi Thử Thách Hằng Ngày hôm nay',
+  q15: 'Lướt húc nát 12 kẻ địch',
+  q16: 'Thu thập 80 Mảnh Neon',
 };
 
 const ACHIEVEMENTS_VI: Record<string, { title: string; desc: string }> = {
@@ -81,6 +95,32 @@ const ACHIEVEMENTS_VI: Record<string, { title: string; desc: string }> = {
   campaign_half: { title: 'Nửa Chặng Đường', desc: 'Vượt qua Khu Vực 03 của chiến dịch Gridfall.' },
   campaign_clear: { title: 'Lưới Đã Hồi Sinh', desc: 'Đánh bại NULL và hoàn thành chiến dịch Gridfall.' },
   campaign_perfect: { title: 'Phi Công Hoàn Hảo', desc: 'Đạt 3 sao ở mọi khu vực của chiến dịch.' },
+  elite_hunter: { title: 'Thợ Săn Mồi Lớn', desc: 'Tiêu diệt tổng cộng 25 kẻ địch tinh nhuệ.' },
+  daily_streak: { title: 'Thói Quen Tốt', desc: 'Chơi Thử Thách Hằng Ngày 3 ngày liên tiếp.' },
+  ship_master: { title: 'Phi Công Át Chủ Bài', desc: 'Đạt Thông Thạo 5 với bất kỳ tàu nào.' },
+};
+
+const MODIFIERS_VI: Record<string, { name: string; desc: string }> = {
+  fast_bullets: { name: 'Đạn Nóng', desc: 'Đạn địch bay nhanh hơn 30%.' },
+  laser_storm: { name: 'Bão Laser', desc: 'Laser bắn dày gấp đôi.' },
+  elite_surge: { name: 'Tinh Nhuệ Tràn Về', desc: 'Kẻ địch tinh nhuệ xuất hiện nhiều gấp ba.' },
+  shard_rain: { name: 'Mưa Mảnh', desc: 'Gấp đôi mảnh, nhưng tầm nam châm giảm một nửa.' },
+  dash_overcharge: { name: 'Lướt Siêu Tốc', desc: 'Lướt hồi nhanh gấp đôi.' },
+  early_boss: { name: 'Báo Động Sớm', desc: 'Cứ 35 giây lại có boss.' },
+  max_power: { name: 'Nạp Đầy Đạn', desc: 'Bắt đầu ở Hỏa Lực 4, nhưng không rơi vật phẩm Hỏa Lực.' },
+  swarm: { name: 'Bầy Đàn', desc: 'Kẻ địch xuất hiện dày hơn 35%.' },
+};
+
+const MASTERY_REWARDS_VI = ['+5% mảnh', 'Màu sơn thay thế', '+1 EMP khởi đầu', '+10% mảnh', '+1 Hỏa Lực & sơn Lăng Kính'];
+
+const SKIN_NAMES_VI: Record<string, string> = {
+  Factory: 'Nguyên bản',
+  Ember: 'Than Hồng',
+  Prism: 'Lăng Kính',
+  Frost: 'Băng Giá',
+  Azure: 'Thiên Thanh',
+  Toxic: 'Độc Tố',
+  Obsidian: 'Hắc Thạch',
 };
 
 interface LevelVi {
@@ -263,6 +303,19 @@ export function localPerk(perk: PerkDef): PerkDef {
 
 export function questLabel(quest: QuestDef): string {
   return (isVi() && QUESTS_VI[quest.id]) || quest.label;
+}
+
+export function localModifier(mod: DailyModifierDef): DailyModifierDef {
+  const vi = isVi() && MODIFIERS_VI[mod.id];
+  return vi ? { ...mod, ...vi } : mod;
+}
+
+export function masteryRewardLabel(en: string, i: number): string {
+  return (isVi() && MASTERY_REWARDS_VI[i]) || en;
+}
+
+export function skinName(name: string): string {
+  return (isVi() && SKIN_NAMES_VI[name]) || name;
 }
 
 export function localAchievement(ach: AchievementDef): AchievementDef {

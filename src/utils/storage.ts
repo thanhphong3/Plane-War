@@ -1,5 +1,7 @@
 import { SaveData } from '../types/game';
-import { INITIAL_SAVE, STORAGE_KEY } from './constants';
+import { DEFAULT_SETTINGS, INITIAL_SAVE, STORAGE_KEY } from './constants';
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
 export function loadGameSave(): SaveData {
   try {
@@ -23,6 +25,16 @@ export function loadGameSave(): SaveData {
       campaignStars: Array.isArray(parsed.campaignStars) ? parsed.campaignStars : [],
       bestBossRush: typeof parsed.bestBossRush === 'number' ? parsed.bestBossRush : 0,
       bestBossRushTime: typeof parsed.bestBossRushTime === 'number' ? parsed.bestBossRushTime : 0,
+      dailyQuests:
+        isObj(parsed.dailyQuests) && Array.isArray(parsed.dailyQuests.ids)
+          ? parsed.dailyQuests
+          : INITIAL_SAVE.dailyQuests,
+      daily: { ...INITIAL_SAVE.daily, ...(isObj(parsed.daily) ? parsed.daily : {}) },
+      shipXp: isObj(parsed.shipXp) ? parsed.shipXp : {},
+      shipSkin: isObj(parsed.shipSkin) ? parsed.shipSkin : {},
+      settings: { ...DEFAULT_SETTINGS, ...(isObj(parsed.settings) ? parsed.settings : {}) },
+      totalElites: typeof parsed.totalElites === 'number' ? parsed.totalElites : 0,
+      totalRevives: typeof parsed.totalRevives === 'number' ? parsed.totalRevives : 0,
     };
   } catch {
     return { ...INITIAL_SAVE };

@@ -1,9 +1,19 @@
 import React, { useState } from 'react';
-import { Check, Lock, X } from 'lucide-react';
+import { Check, Lock, Star, X } from 'lucide-react';
 import { SaveData, ShipDef } from '../types/game';
 import { tr } from '../i18n';
-import { localShip, localUpgrade } from '../i18n/content';
-import { SHIPS, UPGRADES, upgradeCost } from '../utils/constants';
+import { localShip, localUpgrade, masteryRewardLabel, skinName } from '../i18n/content';
+import {
+  MASTERY_REWARDS,
+  MASTERY_XP,
+  MAX_MASTERY,
+  SHIPS,
+  SHIP_SKINS,
+  UPGRADES,
+  masteryLevel,
+  paintedShip,
+  upgradeCost,
+} from '../utils/constants';
 import { sound } from '../utils/audio';
 import { Icon, ShardIcon } from './Icon';
 import { ShipPreview } from './ShipPreview';
@@ -50,6 +60,12 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
       const missing = (ship.cost - saveData.shards).toLocaleString('en-US');
       onShowToast(tr(`Need ${missing} more shards`, `Cần thêm ${missing} mảnh`));
     }
+  };
+
+  const handleSkin = (ship: ShipDef, idx: number) => {
+    if ((saveData.shipSkin[ship.id] || 0) === idx) return;
+    sound.playSound('click');
+    onUpdateSave({ ...saveData, shipSkin: { ...saveData.shipSkin, [ship.id]: idx } });
   };
 
   const handleUpgrade = (upgradeId: keyof SaveData['upgrades']) => {
@@ -127,6 +143,13 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
               const isUnlocked = saveData.unlockedShips.includes(ship.id);
               const isSelected = saveData.selectedShip === ship.id;
               const canAfford = saveData.shards >= ship.cost;
+              const painted = paintedShip(ship, saveData);
+              const xp = saveData.shipXp[ship.id] || 0;
+              const mLvl = masteryLevel(xp);
+              const mNext = mLvl < MAX_MASTERY ? MASTERY_XP[mLvl + 1] : 0;
+              const mFloor = MASTERY_XP[mLvl];
+              const skins = SHIP_SKINS[ship.id] || [];
+              const skinIdx = saveData.shipSkin[ship.id] || 0;
 
               return (
                 <div
@@ -141,7 +164,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
                       className="relative shrink-0 w-16 h-16 rounded-2xl flex items-center justify-center border"
                       style={{ backgroundColor: `${ship.color}12`, borderColor: `${ship.color}40` }}
                     >
-                      <ShipPreview ship={ship} size={60} locked={!isUnlocked} animate={isSelected} />
+                      <ShipPreview ship={painted} size={60} locked={!isUnlocked} animate={isSelected} />
                       {!isUnlocked && <Lock size={14} className="absolute bottom-1 right-1 text-slate-400" />}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -178,6 +201,59 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
                       </div>
                     </div>
                   </div>
+
+                  {isUnlocked && (
+                    <div className="mt-2.5 p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+                      <div className="flex items-center justify-between text-[10px] font-bold">
+                        <span className="flex items-center gap-1" style={{ color: painted.color }}>
+                          <Star size={11} fill="currentColor" /> {tr('Mastery', 'Thông thạo')} {mLvl}/{MAX_MASTERY}
+                        </span>
+                        <span className="text-slate-400 tabular-nums">
+                          {mNext
+                            ? `${(xp - mFloor).toLocaleString('en-US')}/${(mNext - mFloor).toLocaleString('en-US')} XP`
+                            : tr('Maxed', 'Tối đa')}
+                        </span>
+                      </div>
+                      <div className="mt-1 h-1 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${mNext ? ((xp - mFloor) / (mNext - mFloor)) * 100 : 100}%`,
+                            backgroundColor: painted.color,
+                          }}
+                        />
+                      </div>
+                      {mNext > 0 && (
+                        <p className="mt-1 text-[10px] text-slate-400">
+                          {tr('Next', 'Tiếp theo')}: {masteryRewardLabel(MASTERY_REWARDS[mLvl], mLvl)}
+                        </p>
+                      )}
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        {skins.map((skin, idx) => {
+                          const open = mLvl >= skin.level;
+                          const on = skinIdx === idx && open;
+                          return (
+                            <button
+                              key={skin.name}
+                              type="button"
+                              disabled={!open}
+                              onClick={() => handleSkin(ship, idx)}
+                              title={open ? skinName(skin.name) : `${tr('Mastery', 'Thông thạo')} ${skin.level}`}
+                              className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold btn-cyber ${
+                                on ? 'border-white/70 text-white' : 'border-slate-700 text-slate-400'
+                              } ${open ? 'hover:border-slate-500' : 'opacity-50 cursor-not-allowed'}`}
+                            >
+                              <span
+                                className="w-3 h-3 rounded-full border border-white/40"
+                                style={{ background: `linear-gradient(135deg, ${skin.color}, ${skin.secondary})` }}
+                              />
+                              {open ? skinName(skin.name) : <><Lock size={9} /> {skin.level}</>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   <button
                     type="button"

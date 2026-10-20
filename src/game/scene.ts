@@ -1,7 +1,7 @@
 import { GameState, ShipDef } from '../types/game';
 import { drawBossEntity } from './bossArt';
 import { canvasFont } from '../i18n';
-import { LevelDef } from './campaign';
+import { LEVELS, LevelDef, LevelTheme } from './campaign';
 import { EngineState } from './engine';
 import {
   GridWell,
@@ -21,6 +21,38 @@ import {
   hexToRgba,
 } from './render';
 
+function mixHex(a: string, b: string, k: number): string {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const ch = (sh: number) => Math.round(((pa >> sh) & 255) * (1 - k) + ((pb >> sh) & 255) * k);
+  return `#${((1 << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).slice(1)}`;
+}
+
+/** Neon look used before the first Endless biome kicks in. */
+const DEFAULT_THEME: LevelTheme = {
+  top: '#03030c',
+  bottom: '#0a0f26',
+  grid: '#22d3ee',
+  nebula: ['#7c3aed', '#0891b2', '#db2777'],
+};
+
+const biomeTheme = (i: number) => (i < 0 ? DEFAULT_THEME : LEVELS[i % LEVELS.length].theme);
+
+/** Endless biomes: the current sector look, cross-faded from the previous one. */
+function endlessTheme(e: EngineState): LevelTheme | undefined {
+  if (e.biomeTo < 0) return undefined;
+  const a = biomeTheme(e.biomeFrom);
+  const b = biomeTheme(e.biomeTo);
+  const k = Math.max(0, Math.min(1, e.biomeBlend));
+  if (k >= 1) return b;
+  return {
+    top: mixHex(a.top, b.top, k),
+    bottom: mixHex(a.bottom, b.bottom, k),
+    grid: mixHex(a.grid, b.grid, k),
+    nebula: [mixHex(a.nebula[0], b.nebula[0], k), mixHex(a.nebula[1], b.nebula[1], k), mixHex(a.nebula[2], b.nebula[2], k)],
+  };
+}
+
 /** Draws one frame of the world. `level` is the active campaign sector, if any. */
 export function renderScene(
   ctx: CanvasRenderingContext2D,
@@ -34,7 +66,7 @@ export function renderScene(
   const W = e.W;
   const H = e.H;
 
-  const inRun = st === 'PLAYING' || st === 'PAUSED' || st === 'PERK_SELECT';
+  const inRun = st === 'PLAYING' || st === 'PAUSED' || st === 'PERK_SELECT' || st === 'REVIVE';
 
   // Gravity wells bend the grid: bosses pull it in, a Dash ripples it outward
   const wells: GridWell[] = [];
@@ -43,11 +75,13 @@ export function renderScene(
     wells.push({ x: b.x, y: b.y, r: b.r * (b.kind === 'singularity' ? 3.4 : 2.6), s: b.kind === 'singularity' ? 0.42 : 0.24 });
   }
   if (inRun && p.dashTimer > 0) wells.push({ x: p.x, y: p.y, r: 130, s: -0.5 * Math.min(1, p.dashTimer / 0.38) });
-  drawBackground(ctx, W, H, t, e.gridOffsetY, e.bgStars, e.isFeverActive && st === 'PLAYING', !!e.boss, e.warp, level?.theme, wells);
+  const theme = level?.theme ?? (st === 'MENU' ? undefined : endlessTheme(e));
+  drawBackground(ctx, W, H, t, e.gridOffsetY, e.bgStars, e.isFeverActive && st === 'PLAYING', !!e.boss, e.warp, theme, wells);
 
   ctx.save();
-  if (e.screenShake > 0) {
-    ctx.translate((Math.random() - 0.5) * e.screenShake, (Math.random() - 0.5) * e.screenShake);
+  const shake = e.screenShake * e.fxShake;
+  if (shake > 0.2) {
+    ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
   }
 
   if (p.slowFieldTimer > 0 && st === 'PLAYING') {
@@ -273,7 +307,9 @@ export function renderScene(
   ctx.restore();
 
   if (e.flashAlpha > 0) {
-    ctx.fillStyle = hexToRgba(e.flashColor, e.flashAlpha * 0.6);
+    // Reduce Flashing keeps a faint tint so hits still read, without full-screen strobes
+    const a = e.fxReduceFlash ? Math.min(0.08, e.flashAlpha * 0.15) : e.flashAlpha * 0.6;
+    ctx.fillStyle = hexToRgba(e.flashColor, a);
     ctx.fillRect(0, 0, W, H);
   }
   drawVignette(ctx, W, H);

@@ -1,10 +1,11 @@
 import React from 'react';
-import { Bomb, ChevronsUp, Hourglass, Magnet, Music, Pause, Radio, Shield, Skull, Target, Timer, Volume2, VolumeX, Zap } from 'lucide-react';
+import { Bomb, Check, ChevronsUp, Hourglass, Magnet, Music, Pause, Radio, Shield, Skull, Target, Timer, Volume2, VolumeX, Zap } from 'lucide-react';
 import { LevelDef, SPEAKERS, SpeakerId } from '../game/campaign';
+import { questById } from '../game/progression';
 import { tr } from '../i18n';
-import { questLabel } from '../i18n/content';
-import { GameMode, PerkId, QuestDef } from '../types/game';
-import { MAX_WEAPON_LEVEL } from '../utils/constants';
+import { localModifier, questLabel } from '../i18n/content';
+import { DailyModifierId, DailyQuestState, GameMode, PerkId } from '../types/game';
+import { DAILY_MODIFIERS, MAX_WEAPON_LEVEL } from '../utils/constants';
 import { ShardIcon } from './Icon';
 import { PerkIcon, perkDef } from './PerkModal';
 
@@ -37,18 +38,24 @@ interface HUDProps {
   bossHp: number;
   bossName: string;
   bossStatus: string;
+  /** Seconds before an arcade boss retreats, -1 when it fights to the end. */
+  bossEscape: number;
   /** 0..1 while flying through a campaign sector, -1 otherwise. */
   stageProgress: number;
   /** Tactical Perks installed this run. */
   perks: PerkId[];
+  perkLevels: Partial<Record<PerkId, number>>;
   /** Kinetic Capacitor charge 0..1, or -1 without that perk. */
   grazeCharge: number;
   /** Boss Rush: current boss (1-based), -1 outside Boss Rush. */
   bossRush: number;
   level: LevelDef | null;
   comm: CommMessage | null;
-  currentQuest: QuestDef;
-  questProgress: number;
+  /** Today's missions (done flags) and their live progress. */
+  quests: DailyQuestState;
+  questProgress: number[];
+  /** Daily Challenge rule twists, empty in other modes. */
+  modifiers: DailyModifierId[];
   centerBannerText: string;
   isBannerVisible: boolean;
   bannerColorClass: string;
@@ -98,14 +105,17 @@ export const HUD: React.FC<HUDProps> = ({
   bossHp,
   bossName,
   bossStatus,
+  bossEscape,
   stageProgress,
   perks,
+  perkLevels,
   grazeCharge,
   bossRush,
   level,
   comm,
-  currentQuest,
+  quests,
   questProgress,
+  modifiers,
   centerBannerText,
   isBannerVisible,
   bannerColorClass,
@@ -119,7 +129,11 @@ export const HUD: React.FC<HUDProps> = ({
 }) => {
   const dashReady = dashCooldown <= 0;
   const dashProgress = dashMaxCooldown > 0 ? 1 - dashCooldown / dashMaxCooldown : 1;
-  const questClamped = Math.min(currentQuest.target, questProgress);
+  // Show the first mission still open today
+  const openIdx = quests.ids.findIndex((_, i) => !quests.done[i]);
+  const currentQuest = openIdx >= 0 ? questById(quests.ids[openIdx]) : null;
+  const questClamped = currentQuest ? Math.min(currentQuest.target, Math.floor(questProgress[openIdx] || 0)) : 0;
+  const questsDone = quests.done.filter(Boolean).length;
   const hotCombo = combo >= 10;
   const timeLow = gameMode === 'timed' && timedRemaining < 10;
 
@@ -162,7 +176,13 @@ export const HUD: React.FC<HUDProps> = ({
                 {shards.toLocaleString('en-US')}
               </span>
               <span className="text-slate-400 text-[11px] font-bold font-cyber tracking-wider">
-                {level ? level.code : bossRush > 0 ? `BOSS ${bossRush}/7` : `LV ${waveLevel}`}
+                {level
+                  ? level.code
+                  : bossRush > 0
+                  ? `BOSS ${bossRush}/7`
+                  : gameMode === 'daily'
+                  ? `${tr('DAILY', 'NGÀY')} · LV ${waveLevel}`
+                  : `LV ${waveLevel}`}
               </span>
               {gameMode === 'timed' && (
                 <span
@@ -246,6 +266,25 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
         )}
 
+        {/* Daily Challenge rules */}
+        {modifiers.length > 0 && (
+          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            {modifiers.map((id) => {
+              const m = localModifier(DAILY_MODIFIERS.find((d) => d.id === id) || DAILY_MODIFIERS[0]);
+              return (
+                <span
+                  key={id}
+                  title={m.desc}
+                  className="buff-chip"
+                  style={{ color: m.color, borderColor: `${m.color}80`, backgroundColor: `${m.color}1f` }}
+                >
+                  {m.name}
+                </span>
+              );
+            })}
+          </div>
+        )}
+
         {/* Tactical Perks */}
         {perks.length > 0 && (
           <div className="flex items-center gap-1 mt-1.5 flex-wrap">
@@ -266,6 +305,11 @@ export const HUD: React.FC<HUDProps> = ({
                     />
                   )}
                   <PerkIcon id={id} size={13} className="relative" style={{ color: def.color }} />
+                  {(perkLevels[id] || 0) > 1 && (
+                    <span className="absolute bottom-0 right-0 px-[2px] rounded-tl bg-amber-300 text-slate-950 text-[7px] font-black leading-none">
+                      {perkLevels[id]}
+                    </span>
+                  )}
                 </span>
               );
             })}
@@ -299,7 +343,14 @@ export const HUD: React.FC<HUDProps> = ({
               <span className="text-[11px] font-black font-cyber tracking-[0.2em] text-rose-300 neon-glow-pink">
                 {bossName}
               </span>
-              <span className="text-[10px] font-bold text-rose-200/80 tabular-nums">{Math.ceil(bossHp * 100)}%</span>
+              <span className="flex items-center gap-2 text-[10px] font-bold text-rose-200/80 tabular-nums">
+                {bossEscape >= 0 && (
+                  <span className={`flex items-center gap-0.5 ${bossEscape < 10 ? 'text-amber-300 animate-pulse' : 'text-slate-300'}`}>
+                    <Timer size={10} /> {tr(`Escapes in ${Math.ceil(bossEscape)}s`, `Rút lui sau ${Math.ceil(bossEscape)}s`)}
+                  </span>
+                )}
+                {Math.ceil(bossHp * 100)}%
+              </span>
             </div>
             <div className="h-2.5 rounded-full bg-slate-950/90 border border-rose-500/50 overflow-hidden p-[2px]">
               <div
@@ -349,26 +400,35 @@ export const HUD: React.FC<HUDProps> = ({
 
       {/* Bottom Area */}
       <div className="w-full max-w-xl mx-auto flex items-end justify-between gap-3 pb-1 sm:pb-2">
-        {/* Quest tracker */}
+        {/* Daily mission tracker */}
         <div className="glass-panel px-3 py-2 rounded-2xl max-w-[190px] sm:max-w-xs">
           <p className="text-[10px] uppercase tracking-wider text-cyan-400 font-bold font-cyber flex items-center gap-1">
-            <Target size={11} /> {tr('Mission', 'Nhiệm vụ')}
+            <Target size={11} /> {tr('Daily mission', 'Nhiệm vụ ngày')}
+            <span className="ml-auto text-slate-400 tabular-nums">{questsDone}/3</span>
           </p>
-          <p className="text-xs font-semibold text-slate-200 leading-tight mt-0.5">{questLabel(currentQuest)}</p>
-          <div className="flex items-center gap-2 mt-1">
-            <div className="flex-1 h-1 rounded-full bg-slate-800 overflow-hidden">
-              <div
-                className="h-full bg-cyan-400 transition-[width] duration-300"
-                style={{ width: `${(questClamped / currentQuest.target) * 100}%` }}
-              />
-            </div>
-            <span className="text-[10px] font-bold text-slate-300 tabular-nums">
-              {questClamped}/{currentQuest.target}
-            </span>
-          </div>
-          <span className="text-[10px] font-bold text-amber-300 flex items-center gap-1 mt-0.5">
-            {tr('Reward', 'Thưởng')} +{currentQuest.reward} <ShardIcon size={10} />
-          </span>
+          {currentQuest ? (
+            <>
+              <p className="text-xs font-semibold text-slate-200 leading-tight mt-0.5">{questLabel(currentQuest)}</p>
+              <div className="flex items-center gap-2 mt-1">
+                <div className="flex-1 h-1 rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-full bg-cyan-400 transition-[width] duration-300"
+                    style={{ width: `${(questClamped / currentQuest.target) * 100}%` }}
+                  />
+                </div>
+                <span className="text-[10px] font-bold text-slate-300 tabular-nums">
+                  {questClamped.toLocaleString('en-US')}/{currentQuest.target.toLocaleString('en-US')}
+                </span>
+              </div>
+              <span className="text-[10px] font-bold text-amber-300 flex items-center gap-1 mt-0.5">
+                {tr('Reward', 'Thưởng')} +{currentQuest.reward} <ShardIcon size={10} />
+              </span>
+            </>
+          ) : (
+            <p className="text-xs font-semibold text-emerald-300 leading-tight mt-0.5 flex items-center gap-1">
+              <Check size={12} /> {tr('All done. New ones at midnight.', 'Xong hết. Nhiệm vụ mới lúc nửa đêm.')}
+            </p>
+          )}
         </div>
 
         {/* Thumb Action Buttons */}

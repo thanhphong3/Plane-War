@@ -21,10 +21,15 @@ export interface HudSnapshot {
   bossHp: number;
   bossName: string;
   bossStatus: string;
+  /** Seconds before an arcade boss retreats, -1 when it fights to the end. */
+  bossEscape: number;
   stageProgress: number;
-  questProgress: number;
+  /** Live progress of today's three missions. */
+  questProgress: number[];
   /** Tactical Perks installed this run. */
   perks: PerkId[];
+  /** Level of each installed perk. */
+  perkLevels: Partial<Record<PerkId, number>>;
   /** Kinetic Capacitor charge 0..1, or -1 without that perk. */
   grazeCharge: number;
   /** Boss Rush: current boss number (1-based), -1 outside Boss Rush. */

@@ -1,6 +1,7 @@
 import {
   BossEntity,
   BulletEntity,
+  DailyModifierId,
   FloatingTextEntity,
   GemEntity,
   HazardEntity,
@@ -23,6 +24,18 @@ export function fieldScale(W: number): number {
   return Math.max(1, Math.min(4.5, W / REFERENCE_WIDTH));
 }
 
+/** Where a run's points came from (Game Over breakdown). */
+export type ScoreSource = 'survival' | 'graze' | 'combat' | 'shards' | 'boss' | 'bonus';
+
+export const emptyScoreBy = (): Record<ScoreSource, number> => ({
+  survival: 0,
+  graze: 0,
+  combat: 0,
+  shards: 0,
+  boss: 0,
+  bonus: 0,
+});
+
 /** All mutable world data, owned by the 60FPS loop (never React state). */
 export function createEngineState() {
   return {
@@ -44,8 +57,26 @@ export function createEngineState() {
     /** Keeps the HUD Dash bubble up briefly so it doesn't flicker as targets come and go. */
     dashHintHold: 0,
     runShardsEarned: 0,
-    /** Live quest progress; written to the save only when the quest completes or the run ends. */
-    questProgress: 0,
+    /** Live progress of today's three missions; written to the save when one completes or the run ends. */
+    questProgress: [0, 0, 0] as number[],
+    /** Day the live mission progress belongs to (missions re-roll at midnight). */
+    questDate: '',
+    /** Points per source this run, and the run-wide score multiplier (Bullet Hell). */
+    scoreBy: emptyScoreBy(),
+    scoreMult: 1,
+    /** Highest combo milestone (10/20/30) already paid out; drops back as the combo decays. */
+    comboMilestone: 0,
+    elitesThisRun: 0,
+    bulletGrazesThisRun: 0,
+    perksThisRun: 0,
+    /** A revive was already spent this run. */
+    revived: false,
+    /** Daily Challenge rule twists active this run. */
+    modifiers: [] as DailyModifierId[],
+    /** Endless biomes: theme index fading from -> to (-1 = default neon look). */
+    biomeFrom: -1,
+    biomeTo: -1,
+    biomeBlend: 1,
     elapsedRunTime: 0,
     timedRemaining: 60.0,
     waveLevel: 1,
@@ -83,6 +114,8 @@ export function createEngineState() {
 
     // Tactical Perks
     activePerks: [] as PerkId[],
+    /** Level of each installed perk (1..maxLevel). */
+    perkLevels: {} as Partial<Record<PerkId, number>>,
     /** Seconds until the perk picker opens (0 = nothing pending). */
     perkPendingTimer: 0,
     /** Three choices shown by the perk picker. */
@@ -96,7 +129,7 @@ export function createEngineState() {
     /** Swarm Protocol launch timer. */
     missileTimer: 0,
     /** Holo Echo decoys left behind by Dashes. */
-    decoys: [] as { x: number; y: number; life: number; maxLife: number }[],
+    decoys: [] as { x: number; y: number; life: number; maxLife: number; radius: number }[],
 
     // Campaign stage: fly through the sector, then fight its Warden
     stagePhase: 'stage' as 'stage' | 'boss' | 'clear',
@@ -161,6 +194,10 @@ export function createEngineState() {
     laserTimer: 8.0,
     entityIdCounter: 1,
 
+    // Comfort settings mirrored from the save so the renderer can read them
+    fxShake: 1,
+    fxReduceFlash: false,
+
     // Controls
     pointerActive: false,
     /** Identifier of the finger steering the ship, or -1 (mouse / none). */
@@ -175,3 +212,10 @@ export function createEngineState() {
 }
 
 export type EngineState = ReturnType<typeof createEngineState>;
+
+/** Adds points from `src`, applying the run's score multiplier. */
+export function addScore(e: EngineState, pts: number, src: ScoreSource) {
+  const v = pts * e.scoreMult;
+  e.score += v;
+  e.scoreBy[src] += v;
+}

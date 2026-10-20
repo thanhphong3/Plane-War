@@ -1,6 +1,8 @@
 import React from 'react';
 import {
   BookOpen,
+  CalendarDays,
+  Check,
   ChevronRight,
   Crown,
   Flame,
@@ -9,6 +11,7 @@ import {
   Keyboard,
   Music,
   Play,
+  Settings,
   Skull,
   Star,
   Timer,
@@ -19,10 +22,21 @@ import {
   Zap,
 } from 'lucide-react';
 import { LEVELS } from '../game/campaign';
+import { currentDaily, currentDailyQuests, dailyModifiers, msUntilTomorrow, prevDayKey, questById } from '../game/progression';
 import { setLang, tr, useLang } from '../i18n';
-import { localLevel, localShip } from '../i18n/content';
+import { localLevel, localModifier, localShip, questLabel } from '../i18n/content';
 import { GameMode, SaveData, ShipDef } from '../types/game';
-import { SHIPS, UPGRADES, hasClaimableAchievement, upgradeCost } from '../utils/constants';
+import {
+  DAILY_MODIFIERS,
+  DAILY_QUEST_BONUS,
+  SHIPS,
+  UPGRADES,
+  dailyBonus,
+  hasClaimableAchievement,
+  masteryLevel,
+  paintedShip,
+  upgradeCost,
+} from '../utils/constants';
 import { sound } from '../utils/audio';
 import { formatRunTime } from './GameOverModal';
 import { ShardIcon } from './Icon';
@@ -33,6 +47,8 @@ interface MainMenuProps {
   gameMode: GameMode;
   onSelectMode: (mode: GameMode) => void;
   onStartGame: () => void;
+  onStartDaily: () => void;
+  onOpenSettings: () => void;
   onOpenCampaign: () => void;
   onOpenShop: () => void;
   onOpenAchievements: () => void;
@@ -78,6 +94,8 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   gameMode,
   onSelectMode,
   onStartGame,
+  onStartDaily,
+  onOpenSettings,
   onOpenCampaign,
   onOpenShop,
   onOpenAchievements,
@@ -87,7 +105,20 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   onToggleBgm,
 }) => {
   const lang = useLang();
-  const currentShip: ShipDef = localShip(SHIPS.find((s) => s.id === saveData.selectedShip) || SHIPS[0]);
+  const currentShip: ShipDef = localShip(paintedShip(SHIPS.find((s) => s.id === saveData.selectedShip) || SHIPS[0], saveData));
+  const shipMastery = masteryLevel(saveData.shipXp[currentShip.id] || 0);
+
+  // Daily Challenge & missions (both roll over at local midnight)
+  const daily = currentDaily(saveData);
+  const mods = dailyModifiers().map((id) => localModifier(DAILY_MODIFIERS.find((m) => m.id === id) || DAILY_MODIFIERS[0]));
+  const dq = currentDailyQuests(saveData);
+  const resetMins = Math.ceil(msUntilTomorrow() / 60000);
+  const resetIn = `${Math.floor(resetMins / 60)}h ${resetMins % 60}m`;
+  // A streak survives only if the last Daily was today or yesterday
+  const playedToday = daily.lastPlayed === daily.date;
+  const streakAlive = playedToday || daily.lastPlayed === prevDayKey(daily.date);
+  const streakNow = streakAlive ? daily.streak : 0;
+  const streakIfPlayed = playedToday ? daily.streak : streakNow + 1;
   const campaignDone = (saveData.campaignStars[LEVELS.length - 1] || 0) > 0;
   const nextSector = localLevel(LEVELS[Math.min(LEVELS.length - 1, saveData.campaignUnlocked)]);
   const totalStars = saveData.campaignStars.reduce((s, n) => s + (n || 0), 0);
@@ -110,6 +141,18 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <span className="tabular-nums">{saveData.shards.toLocaleString('en-US')}</span>
           </div>
           <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                sound.playSound('click');
+                onOpenSettings();
+              }}
+              title={tr('Settings', 'Cài đặt')}
+              aria-label={tr('Settings', 'Cài đặt')}
+              className="w-9 h-9 rounded-full bg-slate-800/90 border border-slate-700 flex items-center justify-center btn-cyber text-slate-200"
+            >
+              <Settings size={15} />
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -179,7 +222,9 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <ShipPreview ship={currentShip} size={72} animate />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-[10px] text-slate-400 uppercase tracking-wider font-cyber">{tr('Your ship', 'Tàu của bạn')}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wider font-cyber">
+              {tr('Your ship', 'Tàu của bạn')} · {tr('Mastery', 'Thông thạo')} {shipMastery}
+            </p>
             <p className="text-lg font-black text-white font-cyber leading-tight" style={{ color: currentShip.color }}>
               {currentShip.name}
             </p>
@@ -224,6 +269,106 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             </span>
           </div>
         </button>
+
+        {/* Daily Challenge */}
+        <button
+          type="button"
+          onClick={() => {
+            sound.playSound('click');
+            onStartDaily();
+          }}
+          className="group mt-3 relative overflow-hidden p-3 rounded-2xl border-2 border-amber-400/50 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-fuchsia-500/10 hover:border-amber-300 btn-cyber text-left shadow-lg shadow-amber-500/10"
+        >
+          <div className="flex items-center gap-3">
+            <span className="w-11 h-11 shrink-0 rounded-xl bg-amber-500/20 border border-amber-400/50 flex items-center justify-center text-amber-200">
+              <CalendarDays size={20} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] text-amber-300 uppercase tracking-[0.2em] font-cyber font-bold">
+                {tr('Daily Challenge', 'Thử Thách Ngày')}
+              </p>
+              <p className="text-[11px] text-slate-300 leading-snug">
+                {tr('Same spawns for everyone today, two twists:', 'Hôm nay mọi người cùng một màn, kèm hai luật:')}
+              </p>
+            </div>
+            <div className="flex flex-col items-end gap-0.5 shrink-0">
+              <span className="flex items-center gap-1 text-xs font-bold text-amber-200 tabular-nums">
+                <Flame size={12} /> {streakNow} {tr('days', 'ngày')}
+              </span>
+              <span className="flex items-center gap-0.5 text-xs font-bold text-amber-100 group-hover:translate-x-0.5 transition-transform">
+                {tr('Play', 'Chơi')} <ChevronRight size={14} />
+              </span>
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {mods.map((m) => (
+              <span
+                key={m.id}
+                className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                style={{ color: m.color, borderColor: `${m.color}66`, backgroundColor: `${m.color}1a` }}
+                title={m.desc}
+              >
+                {m.name} · <span className="font-semibold text-slate-300">{m.desc}</span>
+              </span>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
+            <span>
+              {tr('Today’s best', 'Kỷ lục hôm nay')}{' '}
+              <span className="font-bold text-slate-100 tabular-nums">{daily.best.toLocaleString('en-US')}</span>
+            </span>
+            <span>
+              {daily.rewarded
+                ? tr('Bonus claimed', 'Đã nhận thưởng')
+                : tr(`First run: +${dailyBonus(streakIfPlayed, 1)}+ shards`, `Lượt đầu: +${dailyBonus(streakIfPlayed, 1)}+ mảnh`)}
+              {' · '}
+              {tr('resets in', 'làm mới sau')} {resetIn}
+            </span>
+          </div>
+        </button>
+
+        {/* Daily missions */}
+        <div className="mt-3 p-3 rounded-2xl bg-slate-900/60 border border-slate-800/80">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 font-cyber">{tr('Daily missions', 'Nhiệm vụ ngày')}</p>
+            <span className="text-[10px] font-bold text-amber-300 flex items-center gap-1">
+              {dq.bonusPaid ? (
+                <>
+                  <Check size={11} /> {tr('Bonus earned', 'Đã nhận thưởng')}
+                </>
+              ) : (
+                <>
+                  {tr('All 3', 'Cả 3')}: +{DAILY_QUEST_BONUS} <ShardIcon size={10} />
+                </>
+              )}
+            </span>
+          </div>
+          <div className="mt-1.5 space-y-1.5">
+            {dq.ids.map((id, i) => {
+              const q = questById(id);
+              const done = dq.done[i];
+              const prog = Math.min(q.target, Math.floor(dq.progress[i] || 0));
+              return (
+                <div key={id} className="flex items-center gap-2 text-xs">
+                  <span
+                    className={`w-4 h-4 shrink-0 rounded-full border flex items-center justify-center ${
+                      done ? 'bg-emerald-400 border-emerald-300 text-slate-950' : 'border-slate-600'
+                    }`}
+                  >
+                    {done && <Check size={10} strokeWidth={3} />}
+                  </span>
+                  <span className={`min-w-0 flex-1 truncate ${done ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
+                    {questLabel(q)}
+                  </span>
+                  <span className="text-[10px] tabular-nums text-slate-400">
+                    {done ? '' : `${prog.toLocaleString('en-US')}/${q.target.toLocaleString('en-US')} · `}
+                    <span className="text-amber-300 font-bold">+{q.reward}</span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         {/* Mode selector with personal bests */}
         <div className="mt-4">

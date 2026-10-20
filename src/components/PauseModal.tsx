@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bomb, Flame, House, Music, Pause, Play, RotateCcw, Volume2, VolumeX, Zap } from 'lucide-react';
+import { Bomb, Flame, House, Music, Pause, Play, RotateCcw, Settings, Volume2, VolumeX, Zap } from 'lucide-react';
 import { tr } from '../i18n';
 import { sound } from '../utils/audio';
 
@@ -12,6 +12,7 @@ interface PauseModalProps {
   isBgmMuted: boolean;
   onToggleMute: () => void;
   onToggleBgm: () => void;
+  onOpenSettings: () => void;
 }
 
 export const PauseModal: React.FC<PauseModalProps> = ({
@@ -23,6 +24,7 @@ export const PauseModal: React.FC<PauseModalProps> = ({
   isBgmMuted,
   onToggleMute,
   onToggleBgm,
+  onOpenSettings,
 }) => {
   if (!isOpen) return null;
 
@@ -55,6 +57,17 @@ export const PauseModal: React.FC<PauseModalProps> = ({
           >
             <Music size={14} className={isBgmMuted ? 'opacity-40' : ''} />
             <span>{isBgmMuted ? tr('Music Off', 'Nhạc: Tắt') : tr('Music On', 'Nhạc: Bật')}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              sound.playSound('click');
+              onOpenSettings();
+            }}
+            className="col-span-2 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 btn-cyber border border-slate-700"
+          >
+            <Settings size={14} />
+            <span>{tr('Settings · volume, flashing, controls', 'Cài đặt · âm lượng, nhấp nháy, điều khiển')}</span>
           </button>
         </div>
 

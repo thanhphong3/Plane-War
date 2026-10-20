@@ -238,7 +238,8 @@ const sentinel: BossBehavior = {
   update(b, api, dt, ready) {
     const rage = b.hp / b.maxHp < 0.4;
     b.angle += dt * (rage ? 1.5 : 0.8);
-    b.status = b.timeLeft < 99 ? `Escapes in ${Math.ceil(Math.max(0, b.timeLeft))}s` : '';
+    // The escape countdown lives in the HUD (it applies to every boss that can retreat)
+    b.status = rage ? tr('ENRAGED — faster volleys!', 'NỔI ĐIÊN — bắn dồn dập hơn!') : '';
     if (!ready) return;
     b.t += dt;
     b.x = api.W / 2 + Math.sin(b.t * 0.55) * api.W * 0.3;

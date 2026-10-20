@@ -2,14 +2,57 @@ import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore }
 import { Sparkles } from 'lucide-react';
 import { BOSSES, BossApi, ShotOpts } from '../game/bosses';
 import { LEVELS, LevelDef, SpeakerId, computeStars } from '../game/campaign';
-import { EngineState, createEngineState, fieldScale } from '../game/engine';
+import { EngineState, ScoreSource, addScore, createEngineState, emptyScoreBy, fieldScale } from '../game/engine';
 import { HudSnapshot, HudStore, createHudStore } from '../game/hudStore';
+import {
+  currentDaily,
+  currentDailyQuests,
+  dailyModifiers,
+  dayKey,
+  daySeed,
+  prevDayKey,
+  questById,
+  rand,
+  setSpawnSeed,
+} from '../game/progression';
+import { fxPrefs } from '../game/render';
 import { renderScene } from '../game/scene';
 import { tr, useLang } from '../i18n';
-import { localLevel, questLabel } from '../i18n/content';
-import { BossEntity, BossKind, BulletEntity, GameMode, GameState, PerkId, QuestType, SaveData, ShipDef } from '../types/game';
+import { localLevel, localModifier, masteryRewardLabel, questLabel } from '../i18n/content';
+import {
+  BossEntity,
+  BossKind,
+  BulletEntity,
+  DailyModifierId,
+  GameMode,
+  GameSettings,
+  GameState,
+  HazardEntity,
+  PerkId,
+  QuestType,
+  SaveData,
+  ShipDef,
+} from '../types/game';
 import { sound } from '../utils/audio';
-import { BOSS_RUSH_ORDER, DASH_COACH_SMASHES, MAX_WEAPON_LEVEL, PERKS, QUESTS, SHIPS } from '../utils/constants';
+import {
+  BOSS_RUSH_ORDER,
+  COMBO_MILESTONES,
+  DAILY_MODIFIERS,
+  DAILY_QUEST_BONUS,
+  DASH_COACH_SMASHES,
+  MASTERY_REWARDS,
+  MAX_WEAPON_LEVEL,
+  PERKS,
+  PERK_REWARDS,
+  PERK_TUNING,
+  SHIPS,
+  dailyBonus,
+  masteryLevel,
+  masteryShardMult,
+  paintedShip,
+  reviveCost,
+  runMasteryXp,
+} from '../utils/constants';
 import { loadGameSave, saveGameData } from '../utils/storage';
 import { AchievementsModal } from './AchievementsModal';
 import { CampaignMap } from './CampaignMap';
@@ -19,6 +62,8 @@ import { LevelClearModal, LevelClearStats } from './LevelClearModal';
 import { MainMenu } from './MainMenu';
 import { PerkModal } from './PerkModal';
 import { PauseModal } from './PauseModal';
+import { ReviveModal } from './ReviveModal';
+import { SettingsModal } from './SettingsModal';
 import { ShopModal } from './ShopModal';
 import { StoryScreen } from './StoryScreen';
 
@@ -47,14 +92,36 @@ const pickupDef = (kind: 'shield' | 'magnet' | 'slow' | 'bomb' | 'power') =>
   })[kind];
 
 /** Modes that offer mid-run Tactical Perks. */
-const perkMode = (mode: GameMode) => mode === 'endless' || mode === 'hardcore' || mode === 'bossrush';
+const perkMode = (mode: GameMode) => mode === 'endless' || mode === 'hardcore' || mode === 'bossrush' || mode === 'daily';
+
+/** Endless-style modes: rotating bosses, wave milestones, biomes. */
+const arcadeMode = (mode: GameMode) => mode === 'endless' || mode === 'hardcore' || mode === 'daily';
+
+/** Modes where a downed pilot may buy one revive (Hardcore and Boss Rush are one-life by design). */
+const reviveMode = (mode: GameMode) => mode === 'endless' || mode === 'daily' || mode === 'campaign';
 
 /** Endless/Timed speed stops ramping here; later waves get denser instead of faster. */
 const SPEED_CAP_WAVE = 9;
 
-/** Dash recharge time for a ship, after Dash Thruster upgrades. */
-const dashCooldownFor = (ship: ShipDef, save: SaveData) =>
-  Math.max(0.8, 2.2 * (1 - (save.upgrades.dashCd || 0) * 0.1) * ship.stats.dashCd);
+/** Endless biome order (sector themes), starting at wave 4 and changing every 3 waves. */
+const BIOME_ORDER = [1, 2, 3, 4, 5, 0];
+
+/** Wave milestones that grant a perk in arcade modes: every 2 waves up to 8, then every 3. */
+const perkWave = (w: number) => (w <= 8 ? w % 2 === 0 : (w - 8) % 3 === 0);
+
+/** Dash recharge time for a ship, after Dash Thruster upgrades, gambits and daily rules. */
+const dashCooldownFor = (ship: ShipDef, save: SaveData, e: EngineState) =>
+  Math.max(
+    0.45,
+    2.2 *
+      (1 - (save.upgrades.dashCd || 0) * 0.1) *
+      ship.stats.dashCd *
+      (e.perkLevels.overclock_dash ? 0.6 : 1) *
+      (e.modifiers.includes('dash_overcharge') ? 0.5 : 1)
+  );
+
+/** Per-level tuning value for a perk (level 1 if not owned, callers check ownership). */
+const tune = <T,>(arr: T[], lvl: number): T => arr[Math.max(0, Math.min(arr.length - 1, lvl - 1))];
 
 type LiveHUDProps = Omit<React.ComponentProps<typeof HUD>, keyof HudSnapshot> & { store: HudStore };
 
@@ -71,15 +138,34 @@ const findTouch = (list: React.TouchList, id: number): React.Touch | null => {
 };
 
 /** Lifetime stats a run adds to the save, whether it ended, cleared a sector or was abandoned. */
-const withRunTotals = (cur: SaveData, e: EngineState): SaveData => ({
-  ...cur,
-  bestCombo: Math.max(cur.bestCombo, e.maxComboThisRun),
-  bestFeverInRun: Math.max(cur.bestFeverInRun, e.feverCountThisRun),
-  totalNearMisses: cur.totalNearMisses + e.nearMissesThisRun,
-  totalDashSmashes: cur.totalDashSmashes + e.dashSmashesThisRun,
-  totalBossKills: cur.totalBossKills + e.bossKillsThisRun,
-  questProgress: e.questProgress,
-});
+const withRunTotals = (cur: SaveData, e: EngineState, shipId: string): SaveData => {
+  const xp = runMasteryXp(e.score, e.bossKillsThisRun);
+  return {
+    ...cur,
+    bestCombo: Math.max(cur.bestCombo, e.maxComboThisRun),
+    bestFeverInRun: Math.max(cur.bestFeverInRun, e.feverCountThisRun),
+    totalNearMisses: cur.totalNearMisses + e.nearMissesThisRun,
+    totalDashSmashes: cur.totalDashSmashes + e.dashSmashesThisRun,
+    totalBossKills: cur.totalBossKills + e.bossKillsThisRun,
+    totalElites: cur.totalElites + e.elitesThisRun,
+    shipXp: xp > 0 ? { ...cur.shipXp, [shipId]: (cur.shipXp[shipId] || 0) + xp } : cur.shipXp,
+    // Mission progress only counts for the day it was earned on
+    dailyQuests:
+      cur.dailyQuests.date === e.questDate
+        ? { ...cur.dailyQuests, progress: cur.dailyQuests.progress.map((v, i) => Math.max(v, e.questProgress[i] || 0)) }
+        : cur.dailyQuests,
+  };
+};
+
+/** Zeroes the per-run counters once they were banked, so nothing is counted twice. */
+const zeroRunTotals = (e: EngineState) => {
+  e.runShardsEarned = 0;
+  e.nearMissesThisRun = 0;
+  e.dashSmashesThisRun = 0;
+  e.bossKillsThisRun = 0;
+  e.elitesThisRun = 0;
+  e.score = 0;
+};
 
 export const NeonGame: React.FC = () => {
   // Re-render every screen when the language is switched
@@ -134,9 +220,11 @@ export const NeonGame: React.FC = () => {
       bossHp: -1,
       bossName: '',
       bossStatus: '',
+      bossEscape: -1,
       stageProgress: -1,
-      questProgress: saveData.questProgress,
+      questProgress: [0, 0, 0],
       perks: [],
+      perkLevels: {},
       grazeCharge: -1,
       bossRush: -1,
     })
@@ -162,11 +250,19 @@ export const NeonGame: React.FC = () => {
     reason: 'crashed',
     reachedBoss: false,
     bossRush: null,
+    scoreBy: emptyScoreBy(),
+    mastery: null,
+    daily: null,
+    revived: false,
   });
 
   // Tactical Perk picker
   const [perkOffer, setPerkOffer] = useState<PerkId[]>([]);
   const [perkSubtitle, setPerkSubtitle] = useState('');
+
+  // Revive offer (cost in shards) and the Settings screen
+  const [reviveOffer, setReviveOffer] = useState(0);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Sound toggles
   const [isMuted, setIsMuted] = useState(saveData.muted);
@@ -230,6 +326,16 @@ export const NeonGame: React.FC = () => {
     setIsBgmMuted(saveData.bgmMuted);
   }, [saveData.muted, saveData.bgmMuted]);
 
+  // Comfort settings: volumes, haptics, flashing and shake
+  const settings = saveData.settings;
+  useEffect(() => {
+    sound.setVolumes(settings.sfxVolume, settings.musicVolume);
+    sound.setHaptics(settings.haptics);
+    fxPrefs.reduceFlash = settings.reduceFlash;
+    engineRef.current.fxReduceFlash = settings.reduceFlash;
+    engineRef.current.fxShake = settings.shake;
+  }, [settings]);
+
   // Start the soundtrack on the first user gesture (browsers block autoplay)
   useEffect(() => {
     const kick = () => {
@@ -280,37 +386,66 @@ export const NeonGame: React.FC = () => {
     [updateSave, showToast]
   );
 
-  // Quest Tracker & Progression
-  const currentQuest = QUESTS[saveData.questIndex % QUESTS.length];
+  const updateSettings = useCallback(
+    (patch: Partial<GameSettings>) => {
+      const cur = saveDataRef.current;
+      updateSave({ ...cur, settings: { ...cur.settings, ...patch } });
+    },
+    [updateSave]
+  );
+
+  // Daily missions: three at a time, re-rolled at local midnight
+  const dailyQuests = currentDailyQuests(saveData);
+
+  // Persist a fresh roll when the day changed since the save was last written
+  useEffect(() => {
+    const cur = saveDataRef.current;
+    if (cur.dailyQuests.date !== dailyQuests.date) updateSave({ ...cur, dailyQuests });
+  }, [dailyQuests, updateSave]);
 
   /**
    * Called from the 60FPS loop, so progress lives in the engine and only touches
-   * React state / localStorage when a quest completes (or the run ends).
+   * React state / localStorage when a mission completes (or the run ends).
+   * Running-total missions add `amount`; best-in-one-run missions (combo, score, wave) take the max.
    */
   const advanceQuest = useCallback(
-    (type: QuestType, amount: number, isAbsolute = false) => {
+    (type: QuestType, amount: number) => {
       const e = engineRef.current;
       const cur = saveDataRef.current;
-      const q = QUESTS[cur.questIndex % QUESTS.length];
-      if (q.type !== type) return;
+      const dq = cur.dailyQuests;
+      if (dq.date !== e.questDate) return;
+      let changed: SaveData | null = null;
+      for (let i = 0; i < dq.ids.length; i++) {
+        if (dq.done[i]) continue;
+        const q = questById(dq.ids[i]);
+        if (q.type !== type) continue;
+        const prev = e.questProgress[i] || 0;
+        const next = q.absolute ? Math.max(prev, Math.floor(amount)) : prev + amount;
+        if (next === prev) continue;
+        e.questProgress[i] = next;
+        if (next < q.target) continue;
 
-      const newProg = isAbsolute ? Math.max(e.questProgress, amount) : e.questProgress + amount;
-      if (newProg === e.questProgress) return;
-      if (newProg >= q.target) {
-        e.questProgress = 0;
-        updateSave({
-          ...cur,
-          shards: cur.shards + q.reward,
-          questIndex: (cur.questIndex + 1) % QUESTS.length,
-          questProgress: 0,
-        });
+        const base: SaveData = changed ?? cur;
+        const done = [...base.dailyQuests.done];
+        done[i] = true;
+        const progress = base.dailyQuests.progress.map((v, k) => Math.max(v, e.questProgress[k] || 0));
+        const allDone = done.every(Boolean) && !base.dailyQuests.bonusPaid;
+        changed = {
+          ...base,
+          shards: base.shards + q.reward + (allDone ? DAILY_QUEST_BONUS : 0),
+          dailyQuests: { ...base.dailyQuests, done, progress, bonusPaid: base.dailyQuests.bonusPaid || allDone },
+        };
         sound.playSound('powerup');
         showToast(
-          tr(`Mission complete: ${q.label}! +${q.reward} shards`, `Hoàn thành nhiệm vụ: ${questLabel(q)}! +${q.reward} mảnh`)
+          allDone
+            ? tr(
+                `All daily missions done! +${q.reward + DAILY_QUEST_BONUS} shards`,
+                `Xong cả 3 nhiệm vụ ngày! +${q.reward + DAILY_QUEST_BONUS} mảnh`
+              )
+            : tr(`Mission complete: ${q.label}! +${q.reward} shards`, `Hoàn thành nhiệm vụ: ${questLabel(q)}! +${q.reward} mảnh`)
         );
-      } else {
-        e.questProgress = newProg;
       }
+      if (changed) updateSave(changed);
     },
     [updateSave, showToast]
   );
@@ -322,8 +457,23 @@ export const NeonGame: React.FC = () => {
 
   const getActiveShip = useCallback((): ShipDef => {
     const cur = saveDataRef.current;
-    return SHIPS.find((s) => s.id === cur.selectedShip) || SHIPS[0];
+    return paintedShip(SHIPS.find((s) => s.id === cur.selectedShip) || SHIPS[0], cur);
   }, []);
+
+  /** Level of an installed Tactical Perk (0 = not installed). */
+  const perkLv = useCallback((id: PerkId) => engineRef.current.perkLevels[id] || 0, []);
+  const hasMod = useCallback((id: DailyModifierId) => engineRef.current.modifiers.includes(id), []);
+
+  /** Shield cap: Glass Cannon pilots can only ever carry one. */
+  const maxShields = useCallback(() => (engineRef.current.perkLevels.glass_cannon ? 1 : 3), []);
+
+  /** Overdrive length after Reactor upgrades and Supernova Core levels. */
+  const feverDuration = useCallback(() => {
+    const nova = engineRef.current.perkLevels.overdrive_nova || 0;
+    return 6.2 + (saveDataRef.current.upgrades.feverDur || 0) * 1.2 + (nova ? tune(PERK_TUNING.overdrive_nova.extra, nova) : 0);
+  }, []);
+
+  const addPts = useCallback((pts: number, src: ScoreSource) => addScore(engineRef.current, pts, src), []);
 
   /** The current campaign sector, or null outside the campaign. */
   const getLevel = useCallback((): LevelDef | null => {
@@ -400,14 +550,6 @@ export const NeonGame: React.FC = () => {
     e.flashAlpha = Math.max(e.flashAlpha, alpha);
   }, []);
 
-  const bumpCombo = useCallback((amount: number, timer: number) => {
-    const e = engineRef.current;
-    e.combo = Math.min(30, e.combo + amount);
-    e.maxComboThisRun = Math.max(e.maxComboThisRun, e.combo);
-    e.comboDecayTimer = timer;
-    e.comboDecayMax = timer;
-  }, []);
-
   // ========================================================
   // Abilities
   // ========================================================
@@ -417,14 +559,16 @@ export const NeonGame: React.FC = () => {
     if (e.isDying || e.player.dashCooldown > 0) return;
 
     e.player.dashTimer = 0.38;
-    e.player.dashMaxCooldown = dashCooldownFor(getActiveShip(), saveDataRef.current);
+    e.player.dashMaxCooldown = dashCooldownFor(getActiveShip(), saveDataRef.current, e);
     e.player.dashCooldown = e.player.dashMaxCooldown;
     e.player.invulnTimer = Math.max(e.player.invulnTimer, 0.45);
     e.player.bossContactCd = 0;
     // Holo Echo: leave a decoy where the Dash started
-    if (e.activePerks.includes('dash_decoy')) {
+    const echo = e.perkLevels.dash_decoy || 0;
+    if (echo) {
       if (e.decoys.length >= 3) e.decoys.shift();
-      e.decoys.push({ x: e.player.x, y: e.player.y, life: 2.5, maxLife: 2.5 });
+      const life = tune(PERK_TUNING.dash_decoy.life, echo);
+      e.decoys.push({ x: e.player.x, y: e.player.y, life, maxLife: life, radius: tune(PERK_TUNING.dash_decoy.radius, echo) });
     }
 
     sound.playSound('dash');
@@ -454,7 +598,7 @@ export const NeonGame: React.FC = () => {
     const rush = gameModeRef.current === 'bossrush';
     e.boss = null;
     e.bossKillsThisRun++;
-    e.nextBossTime = e.elapsedRunTime + 60;
+    e.nextBossTime = e.elapsedRunTime + (e.modifiers.includes('early_boss') ? 35 : 60);
     if (rush) e.bossRushIndex++;
     const rushWon = rush && e.bossRushIndex >= BOSS_RUSH_ORDER.length;
     /** The fight that ends the run: the whole field goes quiet. */
@@ -496,7 +640,7 @@ export const NeonGame: React.FC = () => {
       e.bossRushTimer = 4;
       e.runShardsEarned += 15 + e.bossRushIndex * 8;
       const p = e.player;
-      const drop = pickupDef(p.shieldCount < 2 ? 'shield' : p.weaponLevel < MAX_WEAPON_LEVEL ? 'power' : 'bomb');
+      const drop = pickupDef(p.shieldCount < Math.min(2, maxShields()) ? 'shield' : p.weaponLevel < MAX_WEAPON_LEVEL ? 'power' : 'bomb');
       e.powerups.push({ id: e.entityIdCounter++, x: b.x, y: b.y, vy: 90, r: 17, pulse: 0, ...drop });
     }
     if (!finale && perkMode(gameModeRef.current)) {
@@ -523,8 +667,8 @@ export const NeonGame: React.FC = () => {
       });
     }
 
-    const bonus = 2000 * b.level + 150 * e.combo;
-    e.score += bonus;
+    addPts(2000 * b.level + 150 * e.combo, 'boss');
+    const bonus = Math.round((2000 * b.level + 150 * e.combo) * e.scoreMult);
     addFloatingText(b.x, b.y, `+${bonus.toLocaleString('en-US')}`, '#fde047', 26);
     showCenterBanner(
       rushWon
@@ -536,12 +680,12 @@ export const NeonGame: React.FC = () => {
           )
         : campaign
         ? tr(`${b.name} DEFEATED!`, `ĐÃ HẠ ${b.name}!`)
-        : tr(`SENTINEL DESTROYED! +${bonus.toLocaleString('en-US')}`, `ĐÃ PHÁ LÍNH CANH! +${bonus.toLocaleString('en-US')}`),
+        : tr(`${b.name} DESTROYED! +${bonus.toLocaleString('en-US')}`, `ĐÃ PHÁ ${b.name}! +${bonus.toLocaleString('en-US')}`),
       'neon-glow-amber'
     );
-    advanceQuest('boss', 1, false);
+    advanceQuest('boss', 1);
     refreshMusic();
-  }, [addShockwave, addFloatingText, advanceQuest, flashScreen, refreshMusic, showCenterBanner, spawnParticles]);
+  }, [addShockwave, addFloatingText, addPts, advanceQuest, flashScreen, maxShields, refreshMusic, showCenterBanner, spawnParticles]);
 
   const triggerEmp = useCallback(() => {
     if (gameStateRef.current !== 'PLAYING') return;
@@ -583,11 +727,11 @@ export const NeonGame: React.FC = () => {
     e.lasers = [];
 
     const bonus = converted * 80 * e.combo;
-    e.score += bonus;
-    showCenterBanner(`${tr('EMP BLAST!', 'NỔ EMP!')} +${bonus.toLocaleString('en-US')}`, 'neon-glow-amber');
+    addPts(bonus, 'combat');
+    showCenterBanner(`${tr('EMP BLAST!', 'NỔ EMP!')} +${Math.round(bonus * e.scoreMult).toLocaleString('en-US')}`, 'neon-glow-amber');
     // After the banner so boss-specific EMP reactions can override it
     if (e.boss && bossApiRef.current && bossReady(e.boss)) BOSSES[e.boss.kind].emp(e.boss, bossApiRef.current);
-  }, [spawnParticles, showCenterBanner, addShockwave, flashScreen]);
+  }, [spawnParticles, showCenterBanner, addShockwave, addPts, flashScreen]);
 
   /** Supernova Core: Overdrive starting or ending wipes every enemy bullet. */
   const novaBlast = useCallback(() => {
@@ -605,16 +749,15 @@ export const NeonGame: React.FC = () => {
     flashScreen('#fde047', 0.3);
     addShockwave(p.x, p.y, '#fbbf24', Math.max(e.W, e.H) * 1.1, 7);
     addShockwave(p.x, p.y, '#ffffff', Math.max(e.W, e.H) * 0.6, 3);
-    e.score += n * 15 * e.combo;
+    addPts(n * 15 * e.combo, 'combat');
     addFloatingText(p.x, p.y - 44, `${tr('SUPERNOVA!', 'SIÊU TÂN TINH!')} ×${n}`, '#fde047', 16);
-  }, [spawnParticles, flashScreen, addShockwave, addFloatingText]);
+  }, [spawnParticles, flashScreen, addShockwave, addFloatingText, addPts]);
 
   const activateFeverMode = useCallback(() => {
     const e = engineRef.current;
     e.isFeverActive = true;
     e.feverCountThisRun++;
-    const extraDur = (saveDataRef.current.upgrades.feverDur || 0) * 1.2;
-    e.feverTimeLeft = 6.2 + extraDur;
+    e.feverTimeLeft = feverDuration();
     e.feverEnergy = 100;
     e.player.invulnTimer = Math.max(e.player.invulnTimer, e.feverTimeLeft);
 
@@ -626,27 +769,72 @@ export const NeonGame: React.FC = () => {
     addShockwave(e.player.x, e.player.y, '#fbbf24', 200, 3);
 
     showCenterBanner(tr('OVERDRIVE! SMASH EVERYTHING!', 'QUÁ TẢI! HÚC NÁT TẤT CẢ!'), 'neon-glow-amber');
-    advanceQuest('fever', 1, false);
+    advanceQuest('fever', 1);
     novaBlast();
     refreshMusic();
-  }, [advanceQuest, showCenterBanner, addShockwave, flashScreen, refreshMusic, novaBlast]);
+  }, [advanceQuest, showCenterBanner, addShockwave, feverDuration, flashScreen, refreshMusic, novaBlast]);
 
   const addFeverEnergy = useCallback(
     (amt: number) => {
       const e = engineRef.current;
       if (e.isFeverActive) return;
-      e.feverEnergy = Math.min(100, e.feverEnergy + amt);
+      // Overclocked Thrusters trade Overdrive charge for Dash uptime
+      e.feverEnergy = Math.min(100, e.feverEnergy + amt * (e.perkLevels.overclock_dash ? 0.7 : 1));
       if (e.feverEnergy >= 100) activateFeverMode();
     },
     [activateFeverMode]
   );
 
+  /** Combo x10 / x20 / x30 each pay out once per combo chain (re-armed when the chain breaks). */
+  const comboMilestone = useCallback(
+    (m: number) => {
+      const e = engineRef.current;
+      const p = e.player;
+      const tier = COMBO_MILESTONES.indexOf(m) + 1;
+      e.comboMilestone = m;
+      sound.playSound('combo', tier);
+      sound.triggerHaptic([20, 20, 20, 20, 40]);
+      addShockwave(p.x, p.y, tier === 3 ? '#fde047' : tier === 2 ? '#fbbf24' : '#e879f9', 150 + tier * 60, 3 + tier);
+      spawnParticles(p.x, p.y, tier >= 2 ? '#fde047' : '#f0abfc', 16 + tier * 8, 260, true);
+      addPts(1000 * tier * tier, 'bonus');
+      if (tier === 1) {
+        showCenterBanner(tr('COMBO x10 — RAMPAGE! +ENERGY', 'COMBO x10 — CUỒNG NỘ! +NĂNG LƯỢNG'), 'neon-glow-pink');
+        addFeverEnergy(25);
+      } else if (tier === 2) {
+        showCenterBanner(tr('COMBO x20 — UNSTOPPABLE! +SHIELD', 'COMBO x20 — KHÔNG THỂ CẢN! +KHIÊN'), 'neon-glow-amber');
+        if (p.shieldCount < maxShields()) p.shieldCount++;
+        else addPts(2000, 'bonus');
+      } else {
+        showCenterBanner(tr('COMBO x30 — NEON GOD!', 'COMBO x30 — THẦN NEON!'), 'neon-glow-amber');
+        addFeverEnergy(50);
+      }
+    },
+    [addShockwave, spawnParticles, addPts, showCenterBanner, addFeverEnergy, maxShields]
+  );
+
+  const bumpCombo = useCallback(
+    (amount: number, timer: number) => {
+      const e = engineRef.current;
+      const prev = e.combo;
+      e.combo = Math.min(30, e.combo + amount);
+      e.maxComboThisRun = Math.max(e.maxComboThisRun, e.combo);
+      e.comboDecayTimer = timer;
+      e.comboDecayMax = timer;
+      for (const m of COMBO_MILESTONES) {
+        if (prev < m && e.combo >= m && e.comboMilestone < m) comboMilestone(m);
+      }
+    },
+    [comboMilestone]
+  );
+
   // ========================================================
   // Spawners
   // ========================================================
-  const pushShot = useCallback((x: number, y: number, angle: number, speed: number, opts?: ShotOpts) => {
+  const pushShot = useCallback((x: number, y: number, angle: number, rawSpeed: number, opts?: ShotOpts) => {
     const e = engineRef.current;
     if (e.hazards.length > 300) return;
+    // Bullet Hell gambit and the Hot Lead daily rule speed every enemy bullet up
+    const speed = rawSpeed * (e.perkLevels.bullet_hell ? 1.25 : 1) * (e.modifiers.includes('fast_bullets') ? 1.3 : 1);
     e.hazards.push({
       id: e.entityIdCounter++,
       type: 'shot',
@@ -700,17 +888,24 @@ export const NeonGame: React.FC = () => {
   }, []);
 
   const spawnBoss = useCallback(
-    (kind: BossKind = 'sentinel') => {
+    (kindArg?: BossKind) => {
       const e = engineRef.current;
       const level = getLevel();
       const rush = gameModeRef.current === 'bossrush';
-      // Boss Rush borrows each Warden's campaign tuning; its Sentinel is a fixed MK-2
-      const rushSrc = rush ? LEVELS.find((l) => l.boss === kind) : undefined;
-      const def = level ?? (rushSrc ? localLevel(rushSrc) : null);
+      const arcade = !level && !rush;
       e.bossCount++;
-      const tier = def ? def.id + 1 : rush ? 2 : e.bossCount;
+      // Endless / Hardcore / Daily cycle through every Warden after the opening Sentinel; Blitz keeps the Sentinel
+      const kind: BossKind =
+        kindArg ?? (gameModeRef.current === 'timed' ? 'sentinel' : BOSS_RUSH_ORDER[(e.bossCount - 1) % BOSS_RUSH_ORDER.length]);
+      const loop = arcade ? Math.floor((e.bossCount - 1) / BOSS_RUSH_ORDER.length) : 0;
+      // Boss Rush and arcade Wardens borrow each Warden's campaign tuning; the Rush Sentinel is a fixed MK-2
+      const src = !level && kind !== 'sentinel' ? LEVELS.find((l) => l.boss === kind) : undefined;
+      const def = level ?? (src ? localLevel(src) : null);
+      const tier = def ? def.id + 1 + loop * 3 : rush ? 2 : e.bossCount;
       const hard = gameModeRef.current === 'hardcore';
-      const maxHp = def ? def.bossHp : Math.round((60 + tier * 35) * (hard ? 1.3 : 1));
+      // Each lap of the arcade rotation brings tougher Wardens
+      const arcadeHp = arcade ? (0.85 + loop * 0.35) * (hard ? 1.25 : 1) : 1;
+      const maxHp = def ? Math.round(def.bossHp * arcadeHp) : Math.round((60 + tier * 35) * (hard ? 1.3 : 1));
       const b: BossEntity = {
         kind,
         name: def ? def.bossName : `${tr('SENTINEL', 'LÍNH CANH')} MK-${tier}`,
@@ -726,7 +921,8 @@ export const NeonGame: React.FC = () => {
         attackTimer: 1.6,
         attackIndex: 0,
         hitFlash: 0,
-        timeLeft: def || rush ? Infinity : 38,
+        // Arcade bosses retreat if they're not beaten in time; campaign and Rush bosses fight to the end
+        timeLeft: !arcade ? Infinity : kind === 'sentinel' ? 38 : kind === 'null' ? 90 : 60,
         level: tier,
         entered: false,
         phase: 1,
@@ -747,42 +943,35 @@ export const NeonGame: React.FC = () => {
         'neon-glow-pink'
       );
       if (def) def.bossIntro.forEach((line) => showComm(line.who, line.text));
+      // Outside the campaign the pilot may never have read this Warden's intel card
+      if (def && !level) showComm('iris', def.intel[0]);
       refreshMusic();
     },
     [flashScreen, getLevel, refreshMusic, showCenterBanner, showComm]
   );
 
+  /** Turns a freshly spawned enemy into a gold Elite: tougher, a little slower, always drops loot. */
+  const makeElite = useCallback((h: HazardEntity) => {
+    const e = engineRef.current;
+    const hp = 4 + Math.floor(e.waveLevel / 3) + (h.type === 'splitter' ? 2 : 0);
+    h.elite = true;
+    h.hp = hp;
+    h.maxHp = hp;
+    h.r *= 1.2;
+    h.vx *= 0.8;
+    h.vy *= 0.8;
+    if (h.speed) h.speed *= 0.8;
+    if (h.type === 'seeker') h.life = 8;
+  }, []);
+
   const spawnHazardWave = useCallback(() => {
     const e = engineRef.current;
     const wave = e.waveLevel;
+    const level = getLevel();
     // Speed ramps until SPEED_CAP_WAVE; past that the spawner adds extra enemies instead (see the loop)
     const speedMult = (gameModeRef.current === 'hardcore' ? 1.34 : 1.0) + (Math.min(wave, SPEED_CAP_WAVE) - 1) * 0.1;
-    // Campaign sectors bias the roll towards their own enemy mix
-    const mix = getLevel()?.mix;
-    let roll = Math.random();
-    if (mix) {
-      const total = mix.drone + mix.seeker + mix.spinner + mix.formation + mix.turret;
-      let r = roll * total;
-      const bands: [number, number][] = [
-        [mix.drone, 0.17],
-        [mix.seeker, 0.46],
-        [mix.spinner, 0.66],
-        [mix.formation, 0.8],
-        [mix.turret, 0.95],
-      ];
-      for (const [w, mapped] of bands) {
-        if (r < w) {
-          roll = mapped;
-          break;
-        }
-        r -= w;
-      }
-    }
-    // Spawns come fieldScale() times more often on wide screens. Seekers and turrets go for the
-    // pilot wherever they appear, so keep them at phone frequency and fall back to drones/spinners
     const scale = fieldScale(e.W);
-    const targeted = (roll >= 0.34 && roll < 0.58) || roll >= 0.86;
-    if (targeted && Math.random() > 1 / scale) roll = Math.random() < 0.6 ? 0.1 : 0.66;
+    const first = e.hazards.length;
 
     const pushDrone = (x: number, y: number, vx: number, vy: number, r: number, spin: number) => {
       e.hazards.push({
@@ -800,109 +989,210 @@ export const NeonGame: React.FC = () => {
       });
     };
 
-    if (roll < 0.34) {
-      pushDrone(
-        30 + Math.random() * (e.W - 60),
-        -30,
-        (Math.random() - 0.5) * 70,
-        (190 + Math.random() * 115) * speedMult,
-        14 + Math.random() * 8,
-        (Math.random() - 0.5) * 6
-      );
-    } else if (roll < 0.58) {
-      // Homing seeker from the side
-      const side = Math.random() < 0.5 ? -25 : e.W + 25;
-      e.hazards.push({
-        id: e.entityIdCounter++,
-        type: 'seeker',
-        x: side,
-        y: 60 + Math.random() * (e.H * 0.45),
-        vx: side < 0 ? 140 : -140,
-        vy: 95,
-        speed: (215 + Math.random() * 65) * speedMult,
-        r: 13,
-        angle: side < 0 ? 0 : Math.PI,
-        life: 5.5,
-        color: '#fb923c',
-        grazed: false,
-      });
-    } else if (roll < 0.74) {
-      e.hazards.push({
-        id: e.entityIdCounter++,
-        type: 'spinner',
-        x: 60 + Math.random() * (e.W - 120),
-        y: -45,
-        vx: (Math.random() - 0.5) * 45,
-        vy: 160 * speedMult,
-        r: 24,
-        angle: Math.random() * Math.PI,
-        spin: (Math.random() < 0.5 ? 1 : -1) * 2.8,
-        color: '#ec4899',
-        grazed: false,
-      });
-    } else if (roll < 0.86 && wave >= 2 && Math.random() < 0.55 / scale) {
-      // Wall of mines with a gap — thread the needle for a big shard (spans the screen, so not width-scaled)
-      const spacing = 46;
-      const count = Math.floor((e.W - 40) / spacing);
-      const gap = 1 + Math.floor(Math.random() * Math.max(1, count - 3));
-      const vy = 150 * speedMult;
-      for (let i = 0; i < count; i++) {
-        if (i === gap || i === gap + 1) continue;
-        pushDrone(20 + spacing / 2 + i * spacing, -30, 0, vy, 12, i % 2 ? 3 : -3);
-      }
-      e.gems.push({
-        id: e.entityIdCounter++,
-        x: 20 + spacing / 2 + (gap + 0.5) * spacing,
-        y: -30,
-        vx: 0,
-        vy,
-        r: 11,
-        val: 3,
-        magnetized: false,
-        spin: 0,
-      });
-    } else if (roll < 0.86 || wave < 3) {
-      // Twin drones guarding a high-value shard
-      const centerX = 70 + Math.random() * (e.W - 140);
-      e.gems.push({
-        id: e.entityIdCounter++,
-        x: centerX,
-        y: -35,
-        vx: 0,
-        vy: 170 * speedMult,
-        r: 11,
-        val: 3,
-        magnetized: false,
-        spin: 0,
-      });
-      for (let k = -1; k <= 1; k += 2) {
-        pushDrone(centerX + k * 58, -35, 0, 170 * speedMult, 15, k * 4);
+    // The newer enemy types mix in from wave 2 (a little less in the campaign, whose sectors are hand-tuned)
+    const fresh = Math.min(0.32, 0.1 + wave * 0.025) * (level ? 0.6 : 1);
+    if (wave >= 2 && rand() < fresh) {
+      const kinds: ('splitter' | 'kamikaze' | 'sniper')[] = ['splitter'];
+      if (wave >= 3) kinds.push('kamikaze');
+      if (wave >= 4) kinds.push('sniper');
+      let kind = kinds[Math.floor(rand() * kinds.length)];
+      // Snipers and kamikazes go for the pilot, so keep them at phone frequency on wide screens
+      if (kind !== 'splitter' && rand() > 1 / scale) kind = 'splitter';
+      if (kind === 'splitter') {
+        e.hazards.push({
+          id: e.entityIdCounter++,
+          type: 'splitter',
+          x: 50 + rand() * (e.W - 100),
+          y: -35,
+          vx: (rand() - 0.5) * 50,
+          vy: 125 * speedMult,
+          r: 20,
+          angle: rand() * Math.PI,
+          spin: (rand() < 0.5 ? 1 : -1) * 1.4,
+          hp: 2,
+          maxHp: 2,
+          color: '#8b5cf6',
+          grazed: false,
+        });
+      } else if (kind === 'kamikaze') {
+        e.hazards.push({
+          id: e.entityIdCounter++,
+          type: 'kamikaze',
+          x: 40 + rand() * (e.W - 80),
+          y: -25,
+          vx: 0,
+          vy: 120,
+          r: 13,
+          angle: Math.PI / 2,
+          speed: 520 * Math.sqrt(speedMult),
+          aimTimer: 1.1,
+          color: '#f97316',
+          grazed: false,
+        });
+      } else {
+        e.hazards.push({
+          id: e.entityIdCounter++,
+          type: 'sniper',
+          x: 60 + rand() * (e.W - 120),
+          y: -30,
+          vx: 0,
+          vy: 150,
+          r: 16,
+          angle: Math.PI / 2,
+          hp: 2,
+          maxHp: 2,
+          stopY: e.H * (0.1 + rand() * 0.12),
+          shotsLeft: 2,
+          fireTimer: 0.4,
+          aimTimer: 0,
+          color: '#c084fc',
+          grazed: false,
+        });
       }
     } else {
-      // Turret: parks near the top and fires aimed shots
-      e.hazards.push({
-        id: e.entityIdCounter++,
-        type: 'turret',
-        x: 60 + Math.random() * (e.W - 120),
-        y: -30,
-        vx: 0,
-        vy: 160,
-        r: 17,
-        angle: 0,
-        hp: 3 + Math.floor(wave / 4),
-        stopY: e.H * (0.12 + Math.random() * 0.16),
-        shotsLeft: 3,
-        fireTimer: 0.5,
-        color: '#ef4444',
-        grazed: false,
-      });
+      // Campaign sectors bias the roll towards their own enemy mix
+      const mix = level?.mix;
+      let roll = rand();
+      if (mix) {
+        const total = mix.drone + mix.seeker + mix.spinner + mix.formation + mix.turret;
+        let r = roll * total;
+        const bands: [number, number][] = [
+          [mix.drone, 0.17],
+          [mix.seeker, 0.46],
+          [mix.spinner, 0.66],
+          [mix.formation, 0.8],
+          [mix.turret, 0.95],
+        ];
+        for (const [w, mapped] of bands) {
+          if (r < w) {
+            roll = mapped;
+            break;
+          }
+          r -= w;
+        }
+      }
+      // Spawns come fieldScale() times more often on wide screens. Seekers and turrets go for the
+      // pilot wherever they appear, so keep them at phone frequency and fall back to drones/spinners
+      const targeted = (roll >= 0.34 && roll < 0.58) || roll >= 0.86;
+      if (targeted && rand() > 1 / scale) roll = rand() < 0.6 ? 0.1 : 0.66;
+
+      if (roll < 0.34) {
+        pushDrone(
+          30 + rand() * (e.W - 60),
+          -30,
+          (rand() - 0.5) * 70,
+          (190 + rand() * 115) * speedMult,
+          14 + rand() * 8,
+          (rand() - 0.5) * 6
+        );
+      } else if (roll < 0.58) {
+        // Homing seeker from the side
+        const side = rand() < 0.5 ? -25 : e.W + 25;
+        e.hazards.push({
+          id: e.entityIdCounter++,
+          type: 'seeker',
+          x: side,
+          y: 60 + rand() * (e.H * 0.45),
+          vx: side < 0 ? 140 : -140,
+          vy: 95,
+          speed: (215 + rand() * 65) * speedMult,
+          r: 13,
+          angle: side < 0 ? 0 : Math.PI,
+          life: 5.5,
+          color: '#fb923c',
+          grazed: false,
+        });
+      } else if (roll < 0.74) {
+        e.hazards.push({
+          id: e.entityIdCounter++,
+          type: 'spinner',
+          x: 60 + rand() * (e.W - 120),
+          y: -45,
+          vx: (rand() - 0.5) * 45,
+          vy: 160 * speedMult,
+          r: 24,
+          angle: rand() * Math.PI,
+          spin: (rand() < 0.5 ? 1 : -1) * 2.8,
+          color: '#ec4899',
+          grazed: false,
+        });
+      } else if (roll < 0.86 && wave >= 2 && rand() < 0.55 / scale) {
+        // Wall of mines with a gap — thread the needle for a big shard (spans the screen, so not width-scaled)
+        const spacing = 46;
+        const count = Math.floor((e.W - 40) / spacing);
+        const gap = 1 + Math.floor(rand() * Math.max(1, count - 3));
+        const vy = 150 * speedMult;
+        for (let i = 0; i < count; i++) {
+          if (i === gap || i === gap + 1) continue;
+          pushDrone(20 + spacing / 2 + i * spacing, -30, 0, vy, 12, i % 2 ? 3 : -3);
+        }
+        e.gems.push({
+          id: e.entityIdCounter++,
+          x: 20 + spacing / 2 + (gap + 0.5) * spacing,
+          y: -30,
+          vx: 0,
+          vy,
+          r: 11,
+          val: 3,
+          magnetized: false,
+          spin: 0,
+        });
+        return; // never promote a whole wall to Elite
+      } else if (roll < 0.86 || wave < 3) {
+        // Twin drones guarding a high-value shard
+        const centerX = 70 + rand() * (e.W - 140);
+        e.gems.push({
+          id: e.entityIdCounter++,
+          x: centerX,
+          y: -35,
+          vx: 0,
+          vy: 170 * speedMult,
+          r: 11,
+          val: 3,
+          magnetized: false,
+          spin: 0,
+        });
+        for (let k = -1; k <= 1; k += 2) {
+          pushDrone(centerX + k * 58, -35, 0, 170 * speedMult, 15, k * 4);
+        }
+        return;
+      } else {
+        // Turret: parks near the top and fires aimed shots
+        const hp = 3 + Math.floor(wave / 4);
+        e.hazards.push({
+          id: e.entityIdCounter++,
+          type: 'turret',
+          x: 60 + rand() * (e.W - 120),
+          y: -30,
+          vx: 0,
+          vy: 160,
+          r: 17,
+          angle: 0,
+          hp,
+          maxHp: hp,
+          stopY: e.H * (0.12 + rand() * 0.16),
+          shotsLeft: 3,
+          fireTimer: 0.5,
+          color: '#ef4444',
+          grazed: false,
+        });
+        return;
+      }
     }
-  }, [getLevel]);
+
+    // From wave 3 a lone enemy may roll Elite (three times as often on Elite Surge days)
+    const eliteChance =
+      wave >= 3 ? Math.min(0.12, 0.02 + wave * 0.012) * (level ? 0.5 : 1) * (e.modifiers.includes('elite_surge') ? 3 : 1) : 0;
+    if (e.hazards.length === first + 1 && rand() < eliteChance) {
+      const h = e.hazards[first];
+      if (h.type !== 'kamikaze') makeElite(h);
+    }
+  }, [getLevel, makeElite]);
 
   const spawnGemCluster = useCallback(() => {
     const e = engineRef.current;
-    const baseX = 45 + Math.random() * (e.W - 90);
-    const pattern = Math.random();
+    const baseX = 45 + rand() * (e.W - 90);
+    const pattern = rand();
     const count = pattern < 0.5 ? 4 : 6;
     for (let i = 0; i < count; i++) {
       const offsetX = pattern < 0.5 ? (i - 1.5) * 28 : Math.sin(i * 0.9) * 42;
@@ -920,6 +1210,12 @@ export const NeonGame: React.FC = () => {
     }
   }, []);
 
+  /** Weapon Power can drop unless the blaster is maxed or the Loaded daily rule is on. */
+  const powerCanDrop = useCallback(() => {
+    const e = engineRef.current;
+    return e.player.weaponLevel < MAX_WEAPON_LEVEL && !e.modifiers.includes('max_power');
+  }, []);
+
   const spawnPowerup = useCallback(() => {
     const e = engineRef.current;
     const types = [
@@ -929,13 +1225,10 @@ export const NeonGame: React.FC = () => {
       { kind: 'bomb' as const, color: '#fbbf24', label: tr('+1 EMP BOMB', '+1 BOM EMP') },
     ];
     // Weapon Power shows up often until the blaster is maxed out
-    const chosen =
-      e.player.weaponLevel < MAX_WEAPON_LEVEL && Math.random() < 0.4
-        ? POWER_PICKUP
-        : types[Math.floor(Math.random() * types.length)];
+    const chosen = powerCanDrop() && rand() < 0.4 ? POWER_PICKUP : types[Math.floor(rand() * types.length)];
     e.powerups.push({
       id: e.entityIdCounter++,
-      x: 45 + Math.random() * (e.W - 90),
+      x: 45 + rand() * (e.W - 90),
       y: -30,
       vy: 135,
       r: 17,
@@ -944,18 +1237,72 @@ export const NeonGame: React.FC = () => {
       label: chosen.label,
       pulse: 0,
     });
-  }, []);
+  }, [powerCanDrop]);
 
   /** Turrets sometimes leave a Weapon Power pickup behind. */
   const dropPower = useCallback((x: number, y: number) => {
     const e = engineRef.current;
-    if (e.player.weaponLevel >= MAX_WEAPON_LEVEL || Math.random() > 0.25) return;
+    if (!powerCanDrop() || rand() > 0.25) return;
     e.powerups.push({ id: e.entityIdCounter++, x, y, vy: 110, r: 17, pulse: 0, ...POWER_PICKUP });
-  }, []);
+  }, [powerCanDrop]);
+
+  /** Elites always pay out: Weapon Power, else a shield, else a shard burst. */
+  const eliteLoot = useCallback(
+    (h: HazardEntity) => {
+      const e = engineRef.current;
+      const p = e.player;
+      e.elitesThisRun++;
+      sound.playSound('elite_down');
+      sound.triggerHaptic([30, 20, 50]);
+      e.screenShake = Math.max(e.screenShake, 10);
+      addShockwave(h.x, h.y, '#facc15', 110, 4);
+      spawnParticles(h.x, h.y, '#facc15', 22, 280, true);
+      addPts(400 * e.combo, 'combat');
+      addFloatingText(h.x, h.y - 18, `${tr('ELITE DOWN!', 'HẠ TINH NHUỆ!')} +${Math.round(400 * e.combo * e.scoreMult)}`, '#fde047', 16);
+      const drop = powerCanDrop() ? POWER_PICKUP : p.shieldCount < maxShields() ? pickupDef('shield') : null;
+      if (drop) e.powerups.push({ id: e.entityIdCounter++, x: h.x, y: h.y, vy: 100, r: 17, pulse: 0, ...drop });
+      else {
+        for (let k = 0; k < 4; k++) {
+          const a = (k / 4) * Math.PI * 2;
+          e.gems.push({
+            id: e.entityIdCounter++,
+            x: h.x,
+            y: h.y,
+            vx: Math.cos(a) * 140,
+            vy: Math.sin(a) * 140,
+            r: 10,
+            val: 2,
+            magnetized: false,
+            spin: k,
+          });
+        }
+      }
+      advanceQuest('elite', 1);
+    },
+    [addShockwave, spawnParticles, addPts, addFloatingText, powerCanDrop, maxShields, advanceQuest]
+  );
 
   // ========================================================
   // Damage & Game Lifecycle
   // ========================================================
+  /** Mastery XP this run earned for the active ship, and what it unlocked. */
+  const masteryReport = useCallback((cur: SaveData, e: EngineState): GameOverStats['mastery'] => {
+    const ship = getActiveShip();
+    const gained = runMasteryXp(e.score, e.bossKillsThisRun);
+    const before = cur.shipXp[ship.id] || 0;
+    const prevLevel = masteryLevel(before);
+    const level = masteryLevel(before + gained);
+    if (level > prevLevel) {
+      showToast(
+        tr(
+          `${ship.name} reached Mastery ${level}: ${MASTERY_REWARDS[level - 1]}`,
+          `${ship.name} đạt Thông Thạo ${level}: ${masteryRewardLabel(MASTERY_REWARDS[level - 1], level - 1)}`
+        )
+      );
+    }
+    return { shipName: ship.name, color: ship.color, gained, total: before + gained, prevLevel, level };
+  }, [getActiveShip, showToast]);
+
   const finishGameOver = useCallback(
     (reason: 'crashed' | 'timeup' | 'victory') => {
       const e = engineRef.current;
@@ -976,17 +1323,15 @@ export const NeonGame: React.FC = () => {
       clearComms();
       const cur = saveDataRef.current;
       const finalScore = Math.floor(e.score);
-      const campaign = gameModeRef.current === 'campaign';
-      const rush = gameModeRef.current === 'bossrush';
+      const mode = gameModeRef.current;
+      const campaign = mode === 'campaign';
+      const rush = mode === 'bossrush';
+      const isDaily = mode === 'daily';
       const bestKey =
-        gameModeRef.current === 'timed'
-          ? 'bestTimed'
-          : gameModeRef.current === 'hardcore'
-          ? 'bestHardcore'
-          : rush
-          ? 'bestBossRush'
-          : 'bestEndless';
-      const previousBest = campaign ? 0 : cur[bestKey];
+        mode === 'timed' ? 'bestTimed' : mode === 'hardcore' ? 'bestHardcore' : rush ? 'bestBossRush' : 'bestEndless';
+      // Daily runs compete with today's best only
+      const today = currentDaily(cur);
+      const previousBest = campaign ? 0 : isDaily ? today.best : cur[bestKey];
       const isNewRecord = !campaign && finalScore > previousBest;
 
       // Boss Rush: a full clear pays a big bounty and may set a new fastest time
@@ -996,10 +1341,16 @@ export const NeonGame: React.FC = () => {
       const prevTime = cur.bestBossRushTime;
       const newBestTime = won && (prevTime <= 0 || clearTime < prevTime);
 
+      // Daily Challenge: the first run of the day pays a streak bonus
+      const dailyPay = isDaily && !today.rewarded ? dailyBonus(today.streak, e.waveLevel) : 0;
+      e.runShardsEarned += dailyPay;
+
+      const mastery = masteryReport(cur, e);
       updateSave({
-        ...withRunTotals(cur, e),
-        ...(campaign ? {} : { [bestKey]: Math.max(previousBest, finalScore) }),
+        ...withRunTotals(cur, e, getActiveShip().id),
+        ...(campaign || isDaily ? {} : { [bestKey]: Math.max(previousBest, finalScore) }),
         ...(newBestTime ? { bestBossRushTime: clearTime } : {}),
+        ...(isDaily ? { daily: { ...today, best: Math.max(today.best, finalScore), rewarded: true } } : {}),
         totalRuns: cur.totalRuns + 1,
         shards: cur.shards + e.runShardsEarned,
       });
@@ -1024,10 +1375,68 @@ export const NeonGame: React.FC = () => {
               newBestTime,
             }
           : null,
+        scoreBy: { ...e.scoreBy },
+        mastery,
+        daily: isDaily ? { bonus: dailyPay, streak: today.streak, modifiers: [...e.modifiers] } : null,
+        revived: e.revived,
       });
     },
-    [updateSave, refreshMusic, flashScreen, clearComms]
+    [updateSave, refreshMusic, flashScreen, clearComms, masteryReport, getActiveShip]
   );
+
+  /** A downed pilot in a revive-friendly mode gets one paid second chance per run. */
+  const offerRevive = useCallback((): boolean => {
+    const e = engineRef.current;
+    if (e.revived || !reviveMode(gameModeRef.current)) return false;
+    const cost = reviveCost(e.waveLevel);
+    if (saveDataRef.current.shards + e.runShardsEarned < cost) return false;
+    setReviveOffer(cost);
+    setGameState('REVIVE');
+    gameStateRef.current = 'REVIVE';
+    refreshMusic();
+    return true;
+  }, [refreshMusic]);
+
+  const acceptRevive = useCallback(() => {
+    if (gameStateRef.current !== 'REVIVE') return;
+    const e = engineRef.current;
+    const p = e.player;
+    const cur = saveDataRef.current;
+    const cost = reviveCost(e.waveLevel);
+    // Spend this run's shards first, then the bank
+    const fromRun = Math.min(e.runShardsEarned, cost);
+    e.runShardsEarned -= fromRun;
+    updateSave({ ...cur, shards: Math.max(0, cur.shards - (cost - fromRun)), totalRevives: cur.totalRevives + 1 });
+
+    e.revived = true;
+    e.isDying = false;
+    e.deathTimer = 0;
+    e.combo = Math.max(1, Math.floor(e.combo / 2));
+    p.invulnTimer = 3;
+    p.shieldCount = Math.min(maxShields(), Math.max(1, p.shieldCount));
+    p.dashCooldown = 0;
+    p.trail = [];
+    p.targetX = p.x;
+    p.targetY = p.y;
+    // A clean slate around the pilot: every bullet and laser is gone
+    e.hazards = e.hazards.filter((h) => h.type !== 'shot' && h.type !== 'orb' && Math.hypot(h.x - p.x, h.y - p.y) > 160);
+    e.lasers = [];
+    sound.playSound('revive');
+    sound.triggerHaptic([30, 30, 60]);
+    flashScreen('#67e8f9', 0.5);
+    addShockwave(p.x, p.y, '#67e8f9', 260, 6);
+    addShockwave(p.x, p.y, '#ffffff', 160, 3);
+    spawnParticles(p.x, p.y, '#67e8f9', 40, 320, true);
+    showCenterBanner(tr('SYSTEMS REBOOTED — BACK IN THE FIGHT!', 'HỆ THỐNG KHỞI ĐỘNG LẠI — TIẾP TỤC CHIẾN!'), 'neon-glow-cyan');
+    setGameState('PLAYING');
+    gameStateRef.current = 'PLAYING';
+    refreshMusic();
+  }, [updateSave, maxShields, flashScreen, addShockwave, spawnParticles, showCenterBanner, refreshMusic]);
+
+  const declineRevive = useCallback(() => {
+    if (gameStateRef.current !== 'REVIVE') return;
+    finishGameOver('crashed');
+  }, [finishGameOver]);
 
   const startDeath = useCallback(() => {
     const e = engineRef.current;
@@ -1079,6 +1488,8 @@ export const NeonGame: React.FC = () => {
     const p = e.player;
     const level = getLevel();
     const dashingOrFever = p.dashTimer > 0 || e.isFeverActive;
+    const capacitor = e.perkLevels.graze_shield || 0;
+    const boss = e.boss;
     hudStore.set({
       score: e.score,
       combo: e.combo,
@@ -1096,27 +1507,46 @@ export const NeonGame: React.FC = () => {
       dashCooldown: p.dashCooldown,
       dashMaxCooldown: p.dashMaxCooldown,
       dashHint: e.dashHintHold > 0 && p.dashCooldown <= 0 && !dashingOrFever,
-      bossHp: e.boss ? Math.max(0, e.boss.hp / e.boss.maxHp) : -1,
-      bossName: e.boss ? e.boss.name : '',
-      bossStatus: e.boss && bossReady(e.boss) ? e.boss.status : '',
+      bossHp: boss ? Math.max(0, boss.hp / boss.maxHp) : -1,
+      bossName: boss ? boss.name : '',
+      bossStatus: boss && bossReady(boss) ? boss.status : '',
+      bossEscape: boss && bossReady(boss) && Number.isFinite(boss.timeLeft) ? boss.timeLeft : -1,
       stageProgress: level && e.stagePhase === 'stage' ? Math.min(1, e.stageTimer / level.stageTime) : -1,
-      questProgress: e.questProgress,
+      questProgress: [...e.questProgress],
       perks: e.activePerks,
-      grazeCharge: e.activePerks.includes('graze_shield') ? e.grazeCounterForShield / 18 : -1,
+      perkLevels: { ...e.perkLevels },
+      grazeCharge: capacitor ? e.grazeCounterForShield / tune(PERK_TUNING.graze_shield.grazes, capacitor) : -1,
       bossRush: e.bossRushIndex >= 0 ? Math.min(BOSS_RUSH_ORDER.length, e.bossRushIndex + 1) : -1,
     });
-  }, [getLevel, hudStore]);
+    // Best-in-one-run score missions track the live score
+    advanceQuest('score', e.score);
+  }, [getLevel, hudStore, advanceQuest]);
 
-  /** Rolls three perks the pilot doesn't own yet and opens the picker. Returns false if none are left. */
+  /**
+   * Rolls three choices and opens the picker: perks that can still level up (at most one Gambit),
+   * topped up with one-shot rewards once the pool runs dry.
+   */
   const openPerkSelect = useCallback((): boolean => {
     const e = engineRef.current;
-    const pool = PERKS.map((pk) => pk.id).filter((id) => !e.activePerks.includes(id));
-    if (pool.length === 0) return false;
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
+    const shuffle = <T,>(list: T[]) => {
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+      return list;
+    };
+    const allowGambit = rand() < 0.35;
+    const offer: PerkId[] = [];
+    for (const pk of shuffle(PERKS.filter((pk) => (e.perkLevels[pk.id] || 0) < pk.maxLevel))) {
+      if (pk.gambit && (!allowGambit || offer.some((id) => PERKS.find((d) => d.id === id)?.gambit))) continue;
+      offer.push(pk.id);
+      if (offer.length === 3) break;
     }
-    e.perkOffer = pool.slice(0, 3);
+    for (const rw of shuffle([...PERK_REWARDS])) {
+      if (offer.length >= 3) break;
+      offer.push(rw.id);
+    }
+    e.perkOffer = offer;
     e.pointerActive = false;
     e.touchId = -1;
     e.keys = {};
@@ -1134,11 +1564,31 @@ export const NeonGame: React.FC = () => {
       if (gameStateRef.current !== 'PERK_SELECT') return;
       const e = engineRef.current;
       const p = e.player;
-      if (!e.activePerks.includes(id)) e.activePerks.push(id);
+      const def = PERKS.find((pk) => pk.id === id) ?? PERK_REWARDS.find((pk) => pk.id === id);
+      if (def?.reward) {
+        // One-shot supply drop
+        if (id === 'reward_shield') {
+          if (p.shieldCount < maxShields()) p.shieldCount++;
+          else addPts(500 * e.combo, 'bonus');
+        } else if (id === 'reward_power') {
+          if (p.weaponLevel < MAX_WEAPON_LEVEL) p.weaponLevel++;
+          else addPts(375 * e.combo, 'bonus');
+        } else if (id === 'reward_emp') {
+          p.empBombs = Math.min(5, p.empBombs + 2);
+        }
+      } else {
+        const lvl = (e.perkLevels[id] || 0) + 1;
+        e.perkLevels[id] = lvl;
+        if (!e.activePerks.includes(id)) e.activePerks.push(id);
+        e.perksThisRun++;
+        advanceQuest('perk', 1);
+        if (id === 'glass_cannon') p.shieldCount = Math.min(1, p.shieldCount);
+        if (id === 'bullet_hell') e.scoreMult = 1.5;
+        if (lvl > 1) addFloatingText(p.x, p.y - 30, `${tr('UPGRADED', 'ĐÃ NÂNG')} · LV ${lvl}`, def?.color || '#67e8f9', 14);
+      }
       e.perkOffer = [];
       // A moment of safety to get your bearings after the freeze
       p.invulnTimer = Math.max(p.invulnTimer, 1.2);
-      const def = PERKS.find((pk) => pk.id === id);
       sound.playSound('perk_pick');
       sound.triggerHaptic([20, 20, 40]);
       addShockwave(p.x, p.y, def?.color || '#67e8f9', 160, 4);
@@ -1148,7 +1598,7 @@ export const NeonGame: React.FC = () => {
       refreshMusic();
       syncHud();
     },
-    [addShockwave, spawnParticles, refreshMusic, syncHud]
+    [addShockwave, spawnParticles, addFloatingText, addPts, advanceQuest, maxShields, refreshMusic, syncHud]
   );
 
   /** Starts a run. In the campaign, `fromBoss` skips straight to the sector's Warden. */
@@ -1159,20 +1609,48 @@ export const NeonGame: React.FC = () => {
 
     const e = engineRef.current;
     const ship = getActiveShip();
-    const timed = gameModeRef.current === 'timed';
-    const rush = gameModeRef.current === 'bossrush';
+    const mode = gameModeRef.current;
+    const timed = mode === 'timed';
+    const rush = mode === 'bossrush';
+    const isDaily = mode === 'daily';
     const level = getLevel();
 
+    // Today's missions (re-rolled at midnight) and Daily Challenge bookkeeping
+    const today = dayKey();
+    const save0 = saveDataRef.current;
+    const dq = currentDailyQuests(save0, today);
+    let save = save0.dailyQuests === dq ? save0 : { ...save0, dailyQuests: dq };
+    if (isDaily) {
+      const d = currentDaily(save, today);
+      const firstToday = d.lastPlayed !== today;
+      const streak = firstToday ? (d.lastPlayed === prevDayKey(today) ? d.streak + 1 : 1) : d.streak;
+      save = {
+        ...save,
+        daily: { ...d, attempts: d.attempts + 1, streak, lastPlayed: today, bestStreak: Math.max(d.bestStreak, streak) },
+      };
+    }
+    if (save !== save0) updateSave(save);
+    setSpawnSeed(isDaily ? daySeed(today) : null);
+    e.modifiers = isDaily ? dailyModifiers(today) : [];
+    e.questDate = dq.date;
+    e.questProgress = [...dq.progress];
+
     e.score = 0;
+    e.scoreBy = emptyScoreBy();
+    e.scoreMult = 1;
     e.combo = 1;
+    e.comboMilestone = 0;
     e.maxComboThisRun = 1;
     e.comboDecayTimer = 0;
     e.nearMissesThisRun = 0;
     e.dashSmashesThisRun = 0;
+    e.elitesThisRun = 0;
+    e.bulletGrazesThisRun = 0;
+    e.perksThisRun = 0;
+    e.revived = false;
     e.dashHintId = -1;
     e.dashHintHold = 0;
     e.runShardsEarned = 0;
-    e.questProgress = saveDataRef.current.questProgress;
     e.elapsedRunTime = 0;
     e.timedRemaining = 60.0;
     e.waveLevel = 1;
@@ -1180,6 +1658,9 @@ export const NeonGame: React.FC = () => {
     e.slowMoFactor = 1.0;
     e.slowMoTimer = 0;
     e.flashAlpha = 0;
+    e.biomeFrom = -1;
+    e.biomeTo = -1;
+    e.biomeBlend = 1;
 
     e.feverEnergy = 0;
     e.isFeverActive = false;
@@ -1191,12 +1672,13 @@ export const NeonGame: React.FC = () => {
     e.boss = null;
     e.bossCount = 0;
     e.bossKillsThisRun = 0;
-    e.nextBossTime = timed ? 26 : 55;
+    e.nextBossTime = timed ? 26 : e.modifiers.includes('early_boss') ? 35 : 55;
     e.bossRushIndex = rush ? 0 : -1;
     e.bossRushTimer = rush ? 2.4 : 0;
     e.bossRushWon = false;
 
     e.activePerks = [];
+    e.perkLevels = {};
     e.perkPendingTimer = 0;
     e.perkOffer = [];
     e.perkReason = '';
@@ -1214,6 +1696,9 @@ export const NeonGame: React.FC = () => {
     if (level) e.waveLevel = level.wave;
     if (rush) e.waveLevel = 2;
 
+    // Ship Mastery perks: +1 EMP from level 3, +1 Weapon Power at level 5
+    const mastery = masteryLevel(save.shipXp[ship.id] || 0);
+
     e.player.x = e.W / 2;
     e.player.y = e.H * 0.76;
     e.player.targetX = e.player.x;
@@ -1221,18 +1706,21 @@ export const NeonGame: React.FC = () => {
     e.player.trail = [];
     // Campaign pilots get one extra layer of hull plating
     e.player.shieldCount =
-      (ship.stats.bonusShield && gameModeRef.current !== 'hardcore' ? 1 : 0) + (level || rush ? 1 : 0);
-    e.player.empBombs = ship.id === 'sovereign' ? 2 : 1;
+      (ship.stats.bonusShield && mode !== 'hardcore' ? 1 : 0) + (level || rush ? 1 : 0);
+    e.player.empBombs = (ship.id === 'sovereign' ? 2 : 1) + (mastery >= 3 ? 1 : 0);
     // Weapon Primer upgrades, plus a head start in the late campaign sectors
     e.player.weaponLevel = Math.min(
       MAX_WEAPON_LEVEL,
-      Math.max(rush ? 3 : 1, 1 + (saveDataRef.current.upgrades.primer || 0) + (level ? Math.floor(level.id / 3) : 0))
+      Math.max(
+        rush ? 3 : e.modifiers.includes('max_power') ? 4 : 1,
+        1 + (save.upgrades.primer || 0) + (level ? Math.floor(level.id / 3) : 0) + (mastery >= 5 ? 1 : 0)
+      )
     );
     e.player.magnetTimer = 0;
     e.player.slowFieldTimer = 0;
     e.player.dashTimer = 0;
     e.player.dashCooldown = 0;
-    e.player.dashMaxCooldown = dashCooldownFor(ship, saveDataRef.current);
+    e.player.dashMaxCooldown = dashCooldownFor(ship, save, e);
     e.player.invulnTimer = 1.0;
     e.player.bossContactCd = 0;
     e.player.volley = 0;
@@ -1256,10 +1744,11 @@ export const NeonGame: React.FC = () => {
     e.hazardTimer = 0.4;
     e.gemTimer = 0.2;
     e.powerupTimer = 5.5;
-    e.laserTimer = 6;
+    e.laserTimer = e.modifiers.includes('laser_storm') ? 3 : 6;
 
     setGameState('PLAYING');
     gameStateRef.current = 'PLAYING';
+    if (isDaily) advanceQuest('daily', 1);
     refreshMusic();
     // Don't flash the previous run's numbers before the loop's first sync
     syncHud();
@@ -1268,16 +1757,20 @@ export const NeonGame: React.FC = () => {
     showCenterBanner(
       level
         ? `${level.code} — ${level.name.toUpperCase()}`
+        : isDaily
+        ? `${tr('DAILY', 'HẰNG NGÀY')} — ${e.modifiers
+            .map((id) => localModifier(DAILY_MODIFIERS.find((m) => m.id === id) || DAILY_MODIFIERS[0]).name)
+            .join(' + ')}`
         : timed
         ? tr('60 SECOND BLITZ — GO GO GO!', 'TỐC CHIẾN 60 GIÂY — LÊN NÀO!')
         : rush
         ? tr('BOSS RUSH — 7 BOSSES, ONE LIFE', 'BOSS RUSH — 7 BOSS, MỘT MẠNG')
-        : gameModeRef.current === 'hardcore'
+        : mode === 'hardcore'
         ? tr('HARDCORE — x2 SHARDS!', 'CỰC HẠN — x2 MẢNH!')
         : tr('DRAG TO FLY • DOUBLE-TAP TO DASH', 'KÉO ĐỂ BAY • CHẠM ĐÚP ĐỂ LƯỚT'),
       'neon-glow-cyan'
     );
-  }, [getActiveShip, getLevel, showCenterBanner, refreshMusic, addShockwave, clearComms, syncHud]);
+  }, [getActiveShip, getLevel, showCenterBanner, refreshMusic, addShockwave, clearComms, syncHud, updateSave, advanceQuest]);
 
   const togglePause = useCallback(() => {
     if (gameStateRef.current === 'PLAYING') {
@@ -1308,8 +1801,8 @@ export const NeonGame: React.FC = () => {
   const returnToMainMenu = useCallback(() => {
     setGameState('MENU');
     gameStateRef.current = 'MENU';
-    // The menu's Launch button is for arcade modes; the campaign has its own map
-    if (gameModeRef.current === 'campaign') {
+    // The menu's Launch button is for arcade modes; the campaign and the Daily Challenge have their own cards
+    if (gameModeRef.current === 'campaign' || gameModeRef.current === 'daily') {
       setGameMode('endless');
       gameModeRef.current = 'endless';
     }
@@ -1325,14 +1818,11 @@ export const NeonGame: React.FC = () => {
     const e = engineRef.current;
     const cur = saveDataRef.current;
     const banked = e.runShardsEarned;
-    updateSave({ ...withRunTotals(cur, e), shards: cur.shards + banked });
+    updateSave({ ...withRunTotals(cur, e, getActiveShip().id), shards: cur.shards + banked });
     // Zero the run so nothing gets counted twice
-    e.runShardsEarned = 0;
-    e.nearMissesThisRun = 0;
-    e.dashSmashesThisRun = 0;
-    e.bossKillsThisRun = 0;
+    zeroRunTotals(e);
     if (banked > 0) showToast(tr(`+${banked} shards banked from that run`, `Đã cất +${banked} mảnh từ lượt vừa rồi`));
-  }, [updateSave, showToast]);
+  }, [updateSave, showToast, getActiveShip]);
 
   // ========================================================
   // Campaign flow: map → briefing → sector → debrief → results
@@ -1366,8 +1856,9 @@ export const NeonGame: React.FC = () => {
     const campaignStars = [...cur.campaignStars];
     campaignStars[level.id] = Math.max(prevStars, stars);
 
+    masteryReport(cur, e);
     updateSave({
-      ...withRunTotals(cur, e),
+      ...withRunTotals(cur, e, getActiveShip().id),
       shards: cur.shards + e.runShardsEarned + reward,
       campaignStars,
       campaignUnlocked: Math.max(cur.campaignUnlocked, Math.min(LEVELS.length - 1, level.id + 1)),
@@ -1394,7 +1885,7 @@ export const NeonGame: React.FC = () => {
     setGameState('STORY');
     gameStateRef.current = 'STORY';
     refreshMusic();
-  }, [updateSave, clearWorld, clearComms, refreshMusic]);
+  }, [updateSave, clearWorld, clearComms, refreshMusic, masteryReport, getActiveShip]);
 
   const onStoryDone = useCallback(() => {
     if (storyKind === 'briefing') {
@@ -1578,13 +2069,14 @@ export const NeonGame: React.FC = () => {
     /** Every graze feeds Kinetic Capacitor; 18 of them forge a shield layer. */
     const chargeGrazeShield = () => {
       const e = engineRef.current;
-      if (!hasPerk('graze_shield')) return;
+      const lvl = perkLv('graze_shield');
+      if (!lvl) return;
       e.grazeCounterForShield++;
-      if (e.grazeCounterForShield < 18) return;
+      if (e.grazeCounterForShield < tune(PERK_TUNING.graze_shield.grazes, lvl)) return;
       e.grazeCounterForShield = 0;
       const p = e.player;
-      if (p.shieldCount >= 3) {
-        e.score += 250 * e.combo;
+      if (p.shieldCount >= maxShields()) {
+        addScore(e, 250 * e.combo, 'graze');
         addFloatingText(p.x, p.y - 34, tr('CAPACITOR FULL +SCORE', 'TỤ ĐẦY +ĐIỂM'), '#7dd3fc', 13);
         return;
       }
@@ -1608,24 +2100,28 @@ export const NeonGame: React.FC = () => {
       return best;
     };
 
-    /** Static Aftershock: when a Dash ends, lightning jumps to the 3 closest enemies (or zaps the boss). */
+    /** Static Aftershock: when a Dash ends, lightning jumps to the closest enemies (or zaps the boss). */
     const staticAftershock = () => {
       const e = engineRef.current;
       const p = e.player;
+      const lvl = perkLv('chain_dash');
+      const range = tune(PERK_TUNING.chain_dash.range, lvl);
+      const targets = tune(PERK_TUNING.chain_dash.targets, lvl);
+      const dmg = tune(PERK_TUNING.chain_dash.dmg, lvl);
       const near = e.hazards
-        .filter((h) => h.type !== 'shot' && h.type !== 'orb' && h.y > 0 && Math.hypot(h.x - p.x, h.y - p.y) < 280)
+        .filter((h) => h.type !== 'shot' && h.type !== 'orb' && h.y > 0 && Math.hypot(h.x - p.x, h.y - p.y) < range)
         .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))
-        .slice(0, 3);
+        .slice(0, targets);
       for (const h of near) {
         pushArc(p.x, p.y, h.x, h.y, '#67e8f9');
         const j = e.hazards.indexOf(h);
-        if (j >= 0) damageHazard(j, 4);
+        if (j >= 0) damageHazard(j, dmg);
       }
       const boss = e.boss;
       let zappedBoss = false;
-      if (near.length < 3 && boss && bossReady(boss) && Math.hypot(boss.x - p.x, boss.y - p.y) < 320) {
+      if (near.length < targets && boss && bossReady(boss) && Math.hypot(boss.x - p.x, boss.y - p.y) < range + 40) {
         pushArc(p.x, p.y, boss.x, boss.y, '#67e8f9');
-        const zap: BulletEntity = { id: -1, x: boss.x, y: boss.y, vx: 0, vy: -1, color: '#67e8f9', damage: 3, kind: 'plasma' };
+        const zap: BulletEntity = { id: -1, x: boss.x, y: boss.y, vx: 0, vy: -1, color: '#67e8f9', damage: dmg - 1, kind: 'plasma' };
         zappedBoss = BOSSES[boss.kind].bullet(boss, api, zap) === 'hit';
       }
       if (near.length > 0 || zappedBoss) {
@@ -1635,14 +2131,37 @@ export const NeonGame: React.FC = () => {
       }
     };
 
+    /** Splitters burst into two small drones that peel away diagonally. */
+    const splitApart = (h: HazardEntity) => {
+      const e = engineRef.current;
+      spawnParticles(h.x, h.y, '#c4b5fd', 10, 200, true);
+      for (const s of [-1, 1]) {
+        e.hazards.push({
+          id: e.entityIdCounter++,
+          type: 'drone',
+          x: h.x + s * 8,
+          y: h.y,
+          vx: s * 150,
+          vy: 120 + Math.max(0, h.vy) * 0.5,
+          r: 10,
+          angle: 0,
+          spin: s * 5,
+          color: '#a78bfa',
+          grazed: false,
+        });
+      }
+    };
+
     /** Destroys hazard `j` with the usual score / loot. */
     const killHazard = (j: number) => {
       const e = engineRef.current;
       const h = e.hazards[j];
       spawnParticles(h.x, h.y, h.color, 12, 200);
-      const pts = (h.type === 'turret' ? 150 : 45) * e.combo;
-      e.score += pts;
-      if (h.type === 'turret') {
+      const base =
+        h.type === 'turret' ? 150 : h.type === 'sniper' ? 120 : h.type === 'splitter' ? 70 : h.type === 'kamikaze' ? 60 : 45;
+      const pts = base * e.combo;
+      addScore(e, pts, 'combat');
+      if (h.type === 'turret' || h.type === 'sniper') {
         addShockwave(h.x, h.y, h.color, 70);
         addFloatingText(h.x, h.y, `+${pts}`, '#c4b5fd', 14);
         dropPower(h.x, h.y);
@@ -1659,13 +2178,15 @@ export const NeonGame: React.FC = () => {
         });
       }
       e.hazards.splice(j, 1);
+      if (h.elite) eliteLoot(h);
+      if (h.type === 'splitter') splitApart(h);
     };
 
-    /** Deals weapon damage to hazard `j`. Only turrets have HP; everything else pops. Returns true on a kill. */
+    /** Deals weapon damage to hazard `j`. Turrets, snipers, splitters and Elites have HP; the rest pop. Returns true on a kill. */
     const damageHazard = (j: number, dmg: number): boolean => {
       const e = engineRef.current;
       const h = e.hazards[j];
-      if (h.type === 'turret' && (h.hp || 0) > dmg) {
+      if ((h.hp || 0) > dmg) {
         h.hp = (h.hp || 1) - dmg;
         h.hitFlash = 0.06;
         spawnParticles(h.x, h.y, h.color, 4, 120);
@@ -1872,7 +2393,7 @@ export const NeonGame: React.FC = () => {
       if (!alive) {
         e.deathTimer -= rawDt;
         if (e.deathTimer <= 0) {
-          finishGameOver('crashed');
+          if (!offerRevive()) finishGameOver('crashed');
           return;
         }
       }
@@ -1887,20 +2408,27 @@ export const NeonGame: React.FC = () => {
           : 1 + Math.floor(e.elapsedRunTime / (gameModeRef.current === 'timed' ? 15 : 18));
         if (newWave > e.waveLevel) {
           e.waveLevel = newWave;
-          e.score += e.waveLevel * 150;
+          addScore(e, e.waveLevel * 150, 'bonus');
+          advanceQuest('wave', newWave);
           if (!e.boss && !rush) showCenterBanner(tr(`SPEED LEVEL ${e.waveLevel}!`, `TỐC ĐỘ CẤP ${e.waveLevel}!`), 'neon-glow-pink');
           sound.playSound('wave');
-          // Endless / Hardcore: Wave 2, 4 and 6 each grant a Tactical Perk
+          // Endless / Hardcore / Daily: every 2nd wave up to 8, then every 3rd, grants a Tactical Perk
           const mode = gameModeRef.current;
-          if (
-            (mode === 'endless' || mode === 'hardcore') &&
-            newWave % 2 === 0 &&
-            newWave <= 6 &&
-            newWave > e.perkWaveMilestone
-          ) {
+          if (arcadeMode(mode) && perkWave(newWave) && newWave > e.perkWaveMilestone) {
             e.perkWaveMilestone = newWave;
             e.perkPendingTimer = Math.max(e.perkPendingTimer, 0.5);
             e.perkReason = tr(`Wave ${newWave} reached`, `Đã tới đợt ${newWave}`);
+          }
+          // Biomes: from wave 4 the sector look changes every 3 waves
+          if (arcadeMode(mode) && newWave >= 4) {
+            const biome = BIOME_ORDER[Math.floor((newWave - 4) / 3) % BIOME_ORDER.length];
+            if (biome !== e.biomeTo) {
+              e.biomeFrom = e.biomeTo;
+              e.biomeTo = biome;
+              e.biomeBlend = 0;
+              const name = localLevel(LEVELS[biome]).name;
+              showComm('iris', tr(`Crossing into ${name}. Stay sharp.`, `Đang tiến vào ${name}. Tập trung nhé.`));
+            }
           }
         }
 
@@ -1913,12 +2441,14 @@ export const NeonGame: React.FC = () => {
           }
         }
 
-        e.score += rawDt * 30 * e.combo * (e.isFeverActive ? 2 : 1);
+        addScore(e, rawDt * 30 * e.combo * (e.isFeverActive ? 2 : 1), 'survival');
 
         if (e.combo > 1 && !e.isFeverActive) {
           e.comboDecayTimer -= rawDt;
           if (e.comboDecayTimer <= 0) {
             e.combo = Math.max(1, e.combo - 1);
+            // Milestones pay once per combo chain; they re-arm only once the chain has all but broken
+            if (e.combo <= 3) e.comboMilestone = 0;
             e.comboDecayTimer = 2.8;
             e.comboDecayMax = 2.8;
           }
@@ -1927,8 +2457,7 @@ export const NeonGame: React.FC = () => {
 
       if (e.isFeverActive) {
         e.feverTimeLeft -= rawDt;
-        const maxFeverDur = 6.2 + (saveDataRef.current.upgrades.feverDur || 0) * 1.2;
-        e.feverEnergy = Math.max(0, (e.feverTimeLeft / maxFeverDur) * 100);
+        e.feverEnergy = Math.max(0, (e.feverTimeLeft / feverDuration()) * 100);
         if (e.feverTimeLeft <= 0) {
           e.isFeverActive = false;
           e.feverEnergy = 0;
@@ -2011,15 +2540,20 @@ export const NeonGame: React.FC = () => {
         // Auto-blaster: always on at a slow idle cadence; full rate from combo x5 (lowered by
         // Targeting AI), during Overdrive, or in a boss fight
         const up = saveDataRef.current.upgrades;
-        const berserk = hasPerk('berserk_barrel') && p.shieldCount === 0;
+        const barrel = perkLv('berserk_barrel');
+        const berserk = barrel > 0 && p.shieldCount === 0;
         p.autoFireTimer -= rawDt;
         if (p.autoFireTimer <= 0) {
           const fullRate = e.combo >= Math.max(1, 5 - (up.targeting || 0));
           const interval = e.isFeverActive ? 0.11 : e.boss ? (e.combo >= 10 ? 0.12 : 0.15) : fullRate ? 0.24 : 0.42;
           p.autoFireTimer =
-            (interval * (WEAPON_RATE[ship.id] || 1)) / ((1 + (up.fireRate || 0) * 0.08) * (berserk ? 1.35 : 1));
+            (interval * (WEAPON_RATE[ship.id] || 1)) /
+            ((1 + (up.fireRate || 0) * 0.08) * (berserk ? 1 + tune(PERK_TUNING.berserk_barrel.rate, barrel) : 1));
           const fever = e.isFeverActive;
-          const dmgMult = (1 + (up.blaster || 0) * 0.12) * (berserk ? 1.25 : 1);
+          const dmgMult =
+            (1 + (up.blaster || 0) * 0.12) *
+            (berserk ? 1 + tune(PERK_TUNING.berserk_barrel.dmg, barrel) : 1) *
+            (e.perkLevels.glass_cannon ? 1.6 : 1);
           // A x12 combo still guarantees the twin blaster; Overdrive fires at least the Lv3 spread
           let lvl = Math.max(p.weaponLevel, e.combo >= 12 ? 2 : 1);
           if (fever) lvl = Math.min(MAX_WEAPON_LEVEL, Math.max(3, lvl + 1));
@@ -2027,10 +2561,11 @@ export const NeonGame: React.FC = () => {
         }
 
         // Swarm Protocol: a hot combo keeps a missile pair in the air
-        if (hasPerk('combo_missiles') && e.combo >= 10) {
+        const swarm = perkLv('combo_missiles');
+        if (swarm && e.combo >= tune(PERK_TUNING.combo_missiles.combo, swarm)) {
           e.missileTimer -= rawDt;
           if (e.missileTimer <= 0) {
-            e.missileTimer = 1.8;
+            e.missileTimer = tune(PERK_TUNING.combo_missiles.interval, swarm);
             const dmg = 2 * (1 + (up.blaster || 0) * 0.12);
             for (const s of [-1, 1]) {
               e.bullets.push({
@@ -2058,7 +2593,8 @@ export const NeonGame: React.FC = () => {
       }
 
       // Player bullets
-      const ricochet = hasPerk('ricochet');
+      const prism = perkLv('ricochet');
+      const maxBounces = prism ? tune(PERK_TUNING.ricochet.bounces, prism) : 0;
       for (let i = e.bullets.length - 1; i >= 0; i--) {
         const b = e.bullets[i];
         if (b.kind === 'homing' || b.kind === 'missile') {
@@ -2073,9 +2609,9 @@ export const NeonGame: React.FC = () => {
         b.x += b.vx * rawDt;
         b.y += b.vy * rawDt;
         // Prism Bounce: one ricochet off the side walls
-        if (ricochet && !b.bounced && ((b.x < 6 && b.vx < 0) || (b.x > e.W - 6 && b.vx > 0))) {
+        if ((b.bounces || 0) < maxBounces && ((b.x < 6 && b.vx < 0) || (b.x > e.W - 6 && b.vx > 0))) {
           b.vx = -b.vx;
-          b.bounced = true;
+          b.bounces = (b.bounces || 0) + 1;
           b.x = Math.max(6, Math.min(e.W - 6, b.x));
           spawnParticles(b.x, b.y, '#a78bfa', 3, 90, true);
         }
@@ -2090,7 +2626,7 @@ export const NeonGame: React.FC = () => {
             e.bullets.splice(i, 1);
             if (res === 'hit') {
               spawnParticles(b.x, b.y, boss.color, 3, 120);
-              e.score += 10 * e.combo;
+              addScore(e, 10 * e.combo, 'boss');
               if (b.splashRadius) explode(b.x, b.y, b.splashRadius, (b.damage ?? 1) * 0.6, b.color);
             } else {
               spawnParticles(b.x, b.y, '#e2e8f0', 2, 140, true);
@@ -2130,7 +2666,7 @@ export const NeonGame: React.FC = () => {
       if (alive && e.stagePhase !== 'clear') {
         const bossActive = !!e.boss;
         // Campaign Wardens and Boss Rush bosses get the stage to themselves (mostly)
-        const bossSpawnMult = level || rush ? 3.5 : 2.4;
+        const bossSpawnMult = level || rush ? 3.5 : e.boss && e.boss.kind !== 'sentinel' ? 3 : 2.4;
         // Wide screens spawn proportionally more often so density matches a phone
         const scale = fieldScale(e.W);
         // Boss Rush intermissions are a breather: no fresh enemies between bosses
@@ -2141,13 +2677,14 @@ export const NeonGame: React.FC = () => {
           const overflow = Math.max(0, e.waveLevel - SPEED_CAP_WAVE);
           if (overflow > 0 && Math.random() < Math.min(0.45, overflow * 0.05)) spawnHazardWave();
           const baseInterval = Math.max(0.25, 0.76 - e.waveLevel * 0.045);
-          e.hazardTimer = (baseInterval * (hard ? 0.78 : 1) * (bossActive ? bossSpawnMult : 1)) / scale;
+          e.hazardTimer =
+            (baseInterval * (hard ? 0.78 : 1) * (bossActive ? bossSpawnMult : 1)) / scale / (hasMod('swarm') ? 1.35 : 1);
         }
 
         e.gemTimer -= worldDt;
         if (e.gemTimer <= 0) {
           spawnGemCluster();
-          e.gemTimer = 1.6 / scale;
+          e.gemTimer = (1.6 / scale) * (hasMod('shard_rain') ? 0.5 : 1);
         }
 
         e.powerupTimer -= rawDt;
@@ -2156,14 +2693,15 @@ export const NeonGame: React.FC = () => {
           e.powerupTimer = 8.5 + Math.random() * 3.5;
         }
 
-        const laserMode = level ? level.lasers : rush ? 'none' : e.waveLevel >= 2 ? 'v' : 'none';
+        const storm = hasMod('laser_storm');
+        const laserMode = level ? level.lasers : rush ? 'none' : e.waveLevel >= 2 || storm ? 'v' : 'none';
         if (laserMode !== 'none' && !bossActive) {
           e.laserTimer -= worldDt;
           if (e.laserTimer <= 0) {
-            const horizontal = laserMode === 'h' || (laserMode === 'both' && Math.random() < 0.5);
-            if (horizontal) spawnLaser(p.y + (Math.random() - 0.5) * 100, 'h', 1.3);
-            else spawnLaser(p.x + (Math.random() - 0.5) * 120);
-            e.laserTimer = Math.max(3.2, 7.5 - e.waveLevel * 0.45) * (hard ? 0.8 : 1);
+            const horizontal = laserMode === 'h' || (laserMode === 'both' && rand() < 0.5);
+            if (horizontal) spawnLaser(p.y + (rand() - 0.5) * 100, 'h', 1.3);
+            else spawnLaser(p.x + (rand() - 0.5) * 120);
+            e.laserTimer = Math.max(3.2, 7.5 - e.waveLevel * 0.45) * (hard ? 0.8 : 1) * (storm ? 0.5 : 1);
           }
         }
 
@@ -2193,7 +2731,9 @@ export const NeonGame: React.FC = () => {
       }
 
       // Gems
-      const magnetRange = e.isFeverActive || p.magnetTimer > 0 ? 340 : ship.stats.magnetRange || 90;
+      const magnetRange =
+        (e.isFeverActive || p.magnetTimer > 0 ? 340 : ship.stats.magnetRange || 90) * (hasMod('shard_rain') ? 0.5 : 1);
+      const masteryMult = masteryShardMult(masteryLevel(saveDataRef.current.shipXp[ship.id] || 0));
       for (let i = e.gems.length - 1; i >= 0; i--) {
         const g = e.gems[i];
         g.spin += rawDt * 2;
@@ -2217,22 +2757,24 @@ export const NeonGame: React.FC = () => {
           const shardMult =
             (1 + (saveDataRef.current.upgrades.shardBonus || 0) * 0.2) *
             (hard ? 2 : 1) *
-            (ship.stats.shardMultiplier || 1);
+            (ship.stats.shardMultiplier || 1) *
+            masteryMult *
+            (e.perkLevels.bullet_hell ? 1.3 : 1);
           e.runShardsEarned += Math.max(1, Math.round(g.val * shardMult));
 
           bumpCombo(1, 3.2);
-          const frenzy = hasPerk('shard_frenzy');
-          if (frenzy) p.dashCooldown = Math.max(0, p.dashCooldown - 0.15);
-          const pts = Math.round(25 * e.combo * g.val * (frenzy ? 1.25 : 1));
-          e.score += pts;
+          const frenzy = perkLv('shard_frenzy');
+          if (frenzy) p.dashCooldown = Math.max(0, p.dashCooldown - tune(PERK_TUNING.shard_frenzy.refund, frenzy));
+          const pts = Math.round(25 * e.combo * g.val * (frenzy ? 1 + tune(PERK_TUNING.shard_frenzy.score, frenzy) : 1));
+          addScore(e, pts, 'shards');
           addFeverEnergy(6.5);
 
           sound.playSound('gem', e.combo);
           spawnParticles(g.x, g.y, g.val > 1 ? '#fde047' : '#fbbf24', 7, 130);
           addFloatingText(g.x, g.y, `+${pts}`, '#fde047', 13);
 
-          advanceQuest('gems', 1, false);
-          advanceQuest('combo', e.combo, true);
+          advanceQuest('gems', 1);
+          advanceQuest('combo', e.combo);
 
           e.gems.splice(i, 1);
           continue;
@@ -2276,15 +2818,15 @@ export const NeonGame: React.FC = () => {
             if (e.boss) BOSSES[e.boss.kind].key?.(e.boss, api);
             continue;
           }
-          if (pu.kind === 'shield') p.shieldCount = Math.min(3, p.shieldCount + 1);
+          if (pu.kind === 'shield') p.shieldCount = Math.min(maxShields(), p.shieldCount + 1);
           else if (pu.kind === 'magnet') p.magnetTimer = 8.0;
           else if (pu.kind === 'slow') p.slowFieldTimer = 6.5;
           else if (pu.kind === 'bomb') p.empBombs = Math.min(5, p.empBombs + 1);
           else if (pu.kind === 'power') {
-            if (maxed) e.score += 375 * e.combo;
+            if (maxed) addScore(e, 375 * e.combo, 'bonus');
             else p.weaponLevel++;
           }
-          e.score += 125 * e.combo;
+          addScore(e, 125 * e.combo, 'bonus');
           e.powerups.splice(i, 1);
           continue;
         }
@@ -2320,13 +2862,13 @@ export const NeonGame: React.FC = () => {
           chargeGrazeShield();
           bumpCombo(2, 3.5);
           const pts = 100 * e.combo;
-          e.score += pts;
+          addScore(e, pts, 'graze');
           addFeverEnergy(16);
           notifyGraze(2);
           sound.playSound('nearmiss');
           addFloatingText(p.x, p.y - 24, `${tr('LASER GRAZE!', 'SƯỢT LASER!')} +${pts}`, '#fb7185', 15);
-          advanceQuest('nearmiss', 1, false);
-          advanceQuest('combo', e.combo, true);
+          advanceQuest('nearmiss', 1);
+          advanceQuest('combo', e.combo);
         }
       }
 
@@ -2336,8 +2878,9 @@ export const NeonGame: React.FC = () => {
         const behavior = BOSSES[boss.kind];
         boss.hitFlash = Math.max(0, boss.hitFlash - rawDt);
         if (boss.timeLeft <= 0) {
-          // Retreat (endless Sentinels only — campaign Wardens fight to the end)
+          // Retreat (arcade bosses only — campaign and Rush bosses fight to the end)
           boss.y -= 170 * worldDt;
+          for (const pt of boss.parts) pt.y -= 170 * worldDt;
           if (boss.y < -boss.r * 2) {
             e.boss = null;
             e.nextBossTime = e.elapsedRunTime + 45;
@@ -2348,9 +2891,9 @@ export const NeonGame: React.FC = () => {
           if (boss.y >= boss.targetY - 4) boss.entered = true;
           behavior.update(boss, api, worldDt, false);
         } else {
-          if (alive && boss.kind === 'sentinel') {
+          if (alive && Number.isFinite(boss.timeLeft)) {
             boss.timeLeft -= rawDt;
-            if (boss.timeLeft <= 0) showCenterBanner(tr('THE SENTINEL RETREATED', 'LÍNH CANH ĐÃ RÚT LUI'), 'neon-glow-pink');
+            if (boss.timeLeft <= 0) showCenterBanner(tr(`${boss.name} RETREATED`, `${boss.name} ĐÃ RÚT LUI`), 'neon-glow-pink');
           }
           behavior.update(boss, api, worldDt, true);
         }
@@ -2368,7 +2911,7 @@ export const NeonGame: React.FC = () => {
           const dist = Math.hypot(d.x - h.x, d.y - h.y);
           if (dist < 18) {
             spawnParticles(h.x, h.y, '#f0abfc', 3, 90);
-            e.score += 5 * e.combo;
+            addScore(e, 5 * e.combo, 'combat');
             e.hazards.splice(j, 1);
           } else if (dist < 240) {
             let a = Math.atan2(h.vy, h.vx);
@@ -2388,11 +2931,11 @@ export const NeonGame: React.FC = () => {
           sound.playSound('boom');
           e.screenShake = Math.max(e.screenShake, 8);
           e.hazards = e.hazards.filter((h) => {
-            if (h.type !== 'shot' || Math.hypot(h.x - d.x, h.y - d.y) > 130) return true;
+            if (h.type !== 'shot' || Math.hypot(h.x - d.x, h.y - d.y) > d.radius) return true;
             spawnParticles(h.x, h.y, '#f0abfc', 2, 80);
             return false;
           });
-          explode(d.x, d.y, 130, 4, '#e879f9');
+          explode(d.x, d.y, d.radius, 3 + perkLv('dash_decoy'), '#e879f9');
           addFloatingText(d.x, d.y - 20, tr('ECHO BURST!', 'BÓNG ẢNH NỔ!'), '#f0abfc', 14);
         }
       }
@@ -2415,6 +2958,53 @@ export const NeonGame: React.FC = () => {
           h.vy = Math.sin(h.angle) * spd;
           h.x += h.vx * worldDt;
           h.y += h.vy * worldDt;
+        } else if (h.type === 'sniper') {
+          const stopY = h.stopY || 120;
+          if (h.y < stopY && (h.shotsLeft || 0) > 0) {
+            h.y += Math.max(40, (stopY - h.y) * 2.5) * worldDt;
+            h.angle = Math.atan2(p.y - h.y, p.x - h.x);
+          } else if ((h.shotsLeft || 0) > 0) {
+            if ((h.aimTimer || 0) > 0) {
+              // Tracks the pilot, then holds its aim for the last 0.4s so the shot can be read and dodged
+              const before = h.aimTimer || 0;
+              if (before > 0.4) h.angle = Math.atan2(p.y - h.y, p.x - h.x);
+              h.aimTimer = before - worldDt;
+              if (before > 0.4 && h.aimTimer <= 0.4) sound.playSound('snipe_lock');
+              if (h.aimTimer <= 0) {
+                h.aimTimer = 0;
+                if (alive) {
+                  pushShot(h.x + Math.cos(h.angle) * h.r, h.y + Math.sin(h.angle) * h.r, h.angle, 560, { r: 7, color: '#e879f9' });
+                  sound.playSound('snipe');
+                }
+                h.shotsLeft = (h.shotsLeft || 1) - 1;
+                h.fireTimer = 0.9;
+              }
+            } else {
+              h.fireTimer = (h.fireTimer || 0) - worldDt;
+              if (h.fireTimer <= 0 && alive) h.aimTimer = 1.2;
+            }
+          } else {
+            h.y += 110 * worldDt;
+          }
+        } else if (h.type === 'kamikaze') {
+          if (!h.lunging) {
+            // Drifts in, locks on (Holo Echo decoys fool it too), then commits to a straight lunge
+            h.vy += (30 - h.vy) * Math.min(1, 2 * worldDt);
+            h.y += h.vy * worldDt;
+            const lure = nearestDecoy(h.x, h.y, Infinity) ?? p;
+            h.angle = Math.atan2(lure.y - h.y, lure.x - h.x);
+            h.aimTimer = (h.aimTimer ?? 1.1) - worldDt;
+            if (h.aimTimer <= 0 && alive) {
+              h.lunging = true;
+              const sp = h.speed || 520;
+              h.vx = Math.cos(h.angle) * sp;
+              h.vy = Math.sin(h.angle) * sp;
+              sound.playSound('lunge');
+            }
+          } else {
+            h.x += h.vx * worldDt;
+            h.y += h.vy * worldDt;
+          }
         } else if (h.type === 'turret') {
           const stopY = h.stopY || 120;
           if (h.y < stopY && (h.shotsLeft || 0) > 0) {
@@ -2508,10 +3098,10 @@ export const NeonGame: React.FC = () => {
           spawnParticles(h.x, h.y, '#67e8f9', 18, 280, true);
           bumpCombo(3, 3.5);
           const pts = 300 * e.combo;
-          e.score += pts;
+          addScore(e, pts, 'combat');
           addFeverEnergy(20);
           addFloatingText(p.x, p.y - 26, `${tr('PARRY!', 'PHẢN ĐÒN!')} +${pts}`, '#67e8f9', 17);
-          advanceQuest('dashkill', 1, false);
+          advanceQuest('dashkill', 1);
           noteDashSmash();
           continue;
         }
@@ -2526,7 +3116,7 @@ export const NeonGame: React.FC = () => {
             if (isDashingOrFever) {
               if (isShot) {
                 spawnParticles(h.x, h.y, SHOT_COLOR, 4, 120);
-                e.score += 10 * e.combo;
+                addScore(e, 10 * e.combo, 'combat');
               } else {
                 sound.playSound('boom');
                 sound.triggerHaptic(25);
@@ -2536,11 +3126,12 @@ export const NeonGame: React.FC = () => {
                 addShockwave(h.x, h.y, '#f43f5e', 80);
                 bumpCombo(2, 3.2);
                 const smashPts = 160 * e.combo;
-                e.score += smashPts;
+                addScore(e, smashPts, 'combat');
                 addFloatingText(h.x, h.y, `${tr('SMASH!', 'HÚC NÁT!')} +${smashPts}`, '#67e8f9', 15);
-                if (h.type === 'turret') dropPower(h.x, h.y);
-                advanceQuest('dashkill', 1, false);
-                advanceQuest('combo', e.combo, true);
+                if (h.type === 'turret' || h.type === 'sniper') dropPower(h.x, h.y);
+                if (h.elite) eliteLoot(h);
+                advanceQuest('dashkill', 1);
+                advanceQuest('combo', e.combo);
                 noteDashSmash();
               }
               e.hazards.splice(i, 1);
@@ -2560,9 +3151,11 @@ export const NeonGame: React.FC = () => {
             if (isShot) {
               bumpCombo(1, 3.2);
               const pts = 40 * e.combo;
-              e.score += pts;
+              addScore(e, pts, 'graze');
               addFeverEnergy(7);
               notifyGraze(1);
+              e.bulletGrazesThisRun++;
+              advanceQuest('graze', 1);
               if (e.grazeSoundCd <= 0) {
                 sound.playSound('nearmiss');
                 e.grazeSoundCd = 0.12;
@@ -2573,7 +3166,7 @@ export const NeonGame: React.FC = () => {
               e.nearMissesThisRun++;
               bumpCombo(2, 3.5);
               const grazePts = 85 * e.combo;
-              e.score += grazePts;
+              addScore(e, grazePts, 'graze');
               addFeverEnergy(18);
               notifyGraze(2.5);
               e.slowMoFactor = 0.55;
@@ -2582,9 +3175,9 @@ export const NeonGame: React.FC = () => {
               sound.triggerHaptic(15);
               addShockwave(p.x, p.y, '#e879f9', 65, 2);
               addFloatingText(p.x, p.y - 22, `${tr('NEAR MISS!', 'NÉ SÁT!')} +${grazePts}`, '#f0abfc', 15);
-              advanceQuest('nearmiss', 1, false);
+              advanceQuest('nearmiss', 1);
             }
-            advanceQuest('combo', e.combo, true);
+            advanceQuest('combo', e.combo);
           }
         }
 
@@ -2593,6 +3186,7 @@ export const NeonGame: React.FC = () => {
           h.x < -80 ||
           h.x > e.W + 80 ||
           (isShot && h.y < -40) ||
+          (h.type === 'kamikaze' && h.lunging && h.y < -60) ||
           (h.type === 'seeker' && (h.life || 0) <= 0)
         ) {
           e.hazards.splice(i, 1);
@@ -2663,6 +3257,7 @@ export const NeonGame: React.FC = () => {
         if (e.grazeArcs[i].alpha <= 0) e.grazeArcs.splice(i, 1);
       }
 
+      if (e.biomeBlend < 1) e.biomeBlend = Math.min(1, e.biomeBlend + dt / 2.5);
       if (e.screenShake > 0) e.screenShake = Math.max(0, e.screenShake - 38 * dt);
       if (e.flashAlpha > 0) e.flashAlpha = Math.max(0, e.flashAlpha - 2.4 * dt);
     };
@@ -2721,6 +3316,12 @@ export const NeonGame: React.FC = () => {
     syncHud,
     novaBlast,
     openPerkSelect,
+    offerRevive,
+    eliteLoot,
+    perkLv,
+    hasMod,
+    maxShields,
+    feverDuration,
   ]);
 
   // ========================================================
@@ -2752,8 +3353,9 @@ export const NeonGame: React.FC = () => {
   const onPointerMove = useCallback((clientX: number, clientY: number) => {
     const e = engineRef.current;
     if (!e.pointerActive || gameStateRef.current !== 'PLAYING' || e.isDying) return;
-    const dx = (clientX - e.pointerStartX) * 1.18;
-    const dy = (clientY - e.pointerStartY) * 1.18;
+    const sens = saveDataRef.current.settings.sensitivity;
+    const dx = (clientX - e.pointerStartX) * sens;
+    const dy = (clientY - e.pointerStartY) * sens;
     const margin = 22;
     e.player.targetX = Math.max(margin, Math.min(e.W - margin, e.playerStartX + dx));
     e.player.targetY = Math.max(margin + 50, Math.min(e.H - margin - 20, e.playerStartY + dy));
@@ -2838,7 +3440,8 @@ export const NeonGame: React.FC = () => {
           gameMode={gameMode}
           level={gameMode === 'campaign' ? localLevel(LEVELS[levelIndex]) : null}
           comm={hudComm}
-          currentQuest={currentQuest}
+          quests={dailyQuests}
+          modifiers={engineRef.current.modifiers}
           centerBannerText={centerBannerText}
           isBannerVisible={isBannerVisible}
           bannerColorClass={bannerColorClass}
@@ -2858,6 +3461,12 @@ export const NeonGame: React.FC = () => {
           gameMode={gameMode}
           onSelectMode={setGameMode}
           onStartGame={() => startGame(false)}
+          onStartDaily={() => {
+            setGameMode('daily');
+            gameModeRef.current = 'daily';
+            startGame(false);
+          }}
+          onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenCampaign={() => setIsCampaignOpen(true)}
           onOpenShop={() => setIsShopOpen(true)}
           onOpenAchievements={() => setIsAchievementsOpen(true)}
@@ -2883,8 +3492,18 @@ export const NeonGame: React.FC = () => {
         isOpen={gameState === 'PERK_SELECT'}
         options={perkOffer}
         owned={engineRef.current.activePerks}
+        levels={engineRef.current.perkLevels}
         subtitle={perkSubtitle}
         onPick={pickPerk}
+      />
+
+      <ReviveModal
+        isOpen={gameState === 'REVIVE'}
+        cost={reviveOffer}
+        shards={saveData.shards + engineRef.current.runShardsEarned}
+        score={Math.floor(engineRef.current.score)}
+        onRevive={acceptRevive}
+        onGiveUp={declineRevive}
       />
 
       <PauseModal
@@ -2902,6 +3521,14 @@ export const NeonGame: React.FC = () => {
         isBgmMuted={isBgmMuted}
         onToggleMute={toggleMute}
         onToggleBgm={toggleBgm}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+      />
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        settings={saveData.settings}
+        onChange={updateSettings}
+        onClose={() => setIsSettingsOpen(false)}
       />
 
       <GameOverModal

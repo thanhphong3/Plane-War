@@ -12,6 +12,9 @@ import type { LevelTheme } from './campaign';
 
 type Ctx = CanvasRenderingContext2D;
 
+/** Comfort options the draw calls honour (set from the player's Settings). */
+export const fxPrefs = { reduceFlash: false };
+
 // ---------------------------------------------------------------------------
 // Color helpers & cached glow sprites (additive blending is far cheaper than
 // shadowBlur on mobile GPUs)
@@ -343,6 +346,8 @@ export function drawFog(ctx: Ctx, W: number, H: number, px: number, py: number, 
 // ---------------------------------------------------------------------------
 export const DANGER = '#ff2d55';
 export const DASH_CUE = '#67e8f9';
+/** Elite enemies wear gold. */
+export const ELITE = '#facc15';
 
 /** Proximity alarm strength (0..1) for a hazard of radius r at distance d. */
 function nearness(d: number, r: number, range: number): number {
@@ -587,7 +592,7 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
   if (h.type === 'orb') {
     // Plasma core: big, slow, deflectable
     const fuse = h.fuse ?? 5;
-    const urgent = !h.reflected && fuse < 1.5 && Math.sin(t * 30) > 0;
+    const urgent = !h.reflected && fuse < 1.5 && (fxPrefs.reduceFlash ? fuse < 0.6 : Math.sin(t * 30) > 0);
     const col = h.reflected ? '#22d3ee' : h.color;
     drawGlow(ctx, h.x, h.y, h.r * 3.4, col, 0.85);
     ctx.save();
@@ -639,6 +644,36 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     return;
   }
 
+  // Sniper sight: tracks the pilot (dashed), then locks (solid, flaring) just before it fires
+  if (h.type === 'sniper' && (h.aimTimer || 0) > 0) {
+    const locked = (h.aimTimer || 0) < 0.4;
+    const len = 2000;
+    ctx.save();
+    ctx.strokeStyle = hexToRgba(DANGER, locked ? (fxPrefs.reduceFlash ? 0.8 : 0.55 + 0.45 * Math.abs(Math.sin(t * 30))) : 0.4);
+    ctx.lineWidth = locked ? 2.5 : 1.2;
+    if (!locked) {
+      ctx.setLineDash([8, 8]);
+      ctx.lineDashOffset = -t * 80;
+    }
+    ctx.beginPath();
+    ctx.moveTo(h.x, h.y);
+    ctx.lineTo(h.x + Math.cos(h.angle) * len, h.y + Math.sin(h.angle) * len);
+    ctx.stroke();
+    ctx.restore();
+  }
+  // Kamikaze: faint lock-on line while it winds up
+  if (h.type === 'kamikaze' && !h.lunging) {
+    ctx.save();
+    ctx.strokeStyle = hexToRgba(DANGER, 0.25 + 0.2 * Math.sin(t * 12));
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 7]);
+    ctx.beginPath();
+    ctx.moveTo(h.x, h.y);
+    ctx.lineTo(px, py);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // Proximity alarm for bodies: a red dashed ring that firms up as they close in
   if (near > 0) {
     drawGlow(ctx, h.x, h.y, h.r * 3.2, DANGER, 0.35 * near);
@@ -654,10 +689,119 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
   }
 
   drawGlow(ctx, h.x, h.y, h.r * 2.6, h.color, 0.55);
+  if (h.elite) {
+    // Elite: golden halo and a spinning crown of studs
+    drawGlow(ctx, h.x, h.y, h.r * 3.4, ELITE, 0.4);
+    ctx.save();
+    ctx.translate(h.x, h.y);
+    ctx.rotate(t * 1.6);
+    ctx.strokeStyle = hexToRgba(ELITE, 0.9);
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath();
+    ctx.arc(0, 0, h.r + 11, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = ELITE;
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * (h.r + 11), Math.sin(a) * (h.r + 11), 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
   ctx.save();
   ctx.translate(h.x, h.y);
 
-  if (h.type === 'spinner') {
+  if (h.type === 'splitter') {
+    // Cracked hexagon: reads as "this one breaks apart"
+    ctx.rotate(h.angle);
+    ctx.beginPath();
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2;
+      ctx.lineTo(Math.cos(a) * h.r, Math.sin(a) * h.r);
+    }
+    ctx.closePath();
+    const sg = ctx.createRadialGradient(0, 0, 2, 0, 0, h.r);
+    sg.addColorStop(0, '#ddd6fe');
+    sg.addColorStop(1, h.color);
+    ctx.fillStyle = flash ? '#ffffff' : sg;
+    ctx.fill();
+    ctx.strokeStyle = h.elite ? ELITE : DANGER;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(-h.r * 0.15, -h.r * 0.95);
+    ctx.lineTo(h.r * 0.12, -h.r * 0.2);
+    ctx.lineTo(-h.r * 0.1, h.r * 0.3);
+    ctx.lineTo(h.r * 0.12, h.r * 0.95);
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(-h.r * 0.45, 0, 2.5, 0, Math.PI * 2);
+    ctx.arc(h.r * 0.45, 0, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (h.type === 'sniper') {
+    // Long-barrel platform that turns with its sight line
+    ctx.rotate(h.angle);
+    ctx.fillStyle = flash ? '#ffffff' : '#1e1b4b';
+    ctx.strokeStyle = h.elite ? ELITE : h.color;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(h.r, 0);
+    ctx.lineTo(-h.r * 0.6, -h.r * 0.85);
+    ctx.lineTo(-h.r, 0);
+    ctx.lineTo(-h.r * 0.6, h.r * 0.85);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fecaca';
+    ctx.fillRect(h.r * 0.2, -2.5, h.r * 1.5, 5);
+    const charge = (h.aimTimer || 0) > 0 ? 1 - Math.min(1, (h.aimTimer || 0) / 1.2) : 0;
+    drawGlow(ctx, h.r * 1.7, 0, 6 + charge * 12, DANGER, 0.3 + charge * 0.7);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(0, 0, h.r * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (h.type === 'kamikaze') {
+    // Arrowhead that points where it is about to go
+    ctx.rotate(h.angle);
+    const wind = h.lunging ? 1 : 0.85 + 0.15 * Math.sin(t * 24);
+    if (h.lunging) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const fl = h.r * (2 + Math.random());
+      const fg = ctx.createLinearGradient(-h.r, 0, -h.r - fl, 0);
+      fg.addColorStop(0, 'rgba(255,255,255,0.9)');
+      fg.addColorStop(1, hexToRgba(h.color, 0));
+      ctx.fillStyle = fg;
+      ctx.beginPath();
+      ctx.moveTo(-h.r * 0.7, -h.r * 0.45);
+      ctx.lineTo(-h.r - fl, 0);
+      ctx.lineTo(-h.r * 0.7, h.r * 0.45);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.scale(wind, wind);
+    ctx.fillStyle = flash ? '#ffffff' : h.color;
+    ctx.beginPath();
+    ctx.moveTo(h.r * 1.3, 0);
+    ctx.lineTo(-h.r, -h.r);
+    ctx.lineTo(-h.r * 0.4, 0);
+    ctx.lineTo(-h.r, h.r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = h.elite ? ELITE : DANGER;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = h.lunging || Math.sin(t * 20) > 0 ? '#ffffff' : '#7f1d1d';
+    ctx.beginPath();
+    ctx.arc(h.r * 0.2, 0, 3, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (h.type === 'spinner') {
     ctx.rotate(h.angle);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
@@ -761,12 +905,6 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     ctx.beginPath();
     ctx.arc(0, 0, h.r * 0.18, 0, Math.PI * 2);
     ctx.fill();
-    // HP pips
-    const hp = h.hp || 0;
-    for (let i = 0; i < hp; i++) {
-      ctx.fillStyle = '#fca5a5';
-      ctx.fillRect(-h.r + i * 9, h.r + 6, 7, 3);
-    }
   } else {
     // Spiked drone mine
     ctx.rotate(h.angle);
@@ -799,6 +937,18 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     ctx.fill();
   }
   ctx.restore();
+
+  // HP pips for anything that takes more than one hit
+  const maxHp = h.maxHp || 0;
+  if (maxHp > 1) {
+    const hp = Math.max(0, Math.ceil(h.hp || 0));
+    const pip = Math.min(7, Math.max(3, (h.r * 2.2) / maxHp - 2));
+    const total = maxHp * (pip + 2) - 2;
+    for (let i = 0; i < maxHp; i++) {
+      ctx.fillStyle = i < hp ? (h.elite ? ELITE : '#fca5a5') : 'rgba(51, 65, 85, 0.8)';
+      ctx.fillRect(h.x - total / 2 + i * (pip + 2), h.y + h.r + (h.elite ? 16 : 6), pip, 3);
+    }
+  }
 }
 
 /**
@@ -855,7 +1005,7 @@ export function drawLaser(ctx: Ctx, l: LaserEntity, W: number, H: number, t: num
   const half = l.width / 2;
   if (l.warnTime > 0) {
     // Telegraph: flashing danger column
-    const blink = Math.sin(t * 28) > 0 ? 1 : 0.45;
+    const blink = fxPrefs.reduceFlash ? 0.8 : Math.sin(t * 28) > 0 ? 1 : 0.45;
     ctx.fillStyle = `rgba(244, 63, 94, ${0.07 * blink + 0.03})`;
     ctx.fillRect(l.x - half, 0, l.width, H);
     ctx.strokeStyle = `rgba(251, 113, 133, ${0.65 * blink})`;

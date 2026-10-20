@@ -1,7 +1,7 @@
-export type GameMode = 'endless' | 'timed' | 'hardcore' | 'campaign' | 'bossrush';
-export type GameState = 'MENU' | 'PLAYING' | 'PAUSED' | 'GAMEOVER' | 'STORY' | 'LEVELCLEAR' | 'PERK_SELECT';
+export type GameMode = 'endless' | 'timed' | 'hardcore' | 'campaign' | 'bossrush' | 'daily';
+export type GameState = 'MENU' | 'PLAYING' | 'PAUSED' | 'GAMEOVER' | 'STORY' | 'LEVELCLEAR' | 'PERK_SELECT' | 'REVIVE';
 
-/** Mid-run Tactical Perks (Endless / Hardcore / Boss Rush). */
+/** Mid-run Tactical Perks (Endless / Hardcore / Boss Rush / Daily). */
 export type PerkId =
   | 'chain_dash'
   | 'graze_shield'
@@ -10,14 +10,60 @@ export type PerkId =
   | 'overdrive_nova'
   | 'combo_missiles'
   | 'shard_frenzy'
-  | 'berserk_barrel';
+  | 'berserk_barrel'
+  // Gambits: a big upside with a real drawback (one level only)
+  | 'glass_cannon'
+  | 'bullet_hell'
+  | 'overclock_dash'
+  // One-shot rewards offered once every perk is maxed out
+  | 'reward_shield'
+  | 'reward_power'
+  | 'reward_emp';
 
 export interface PerkDef {
   id: PerkId;
   name: string;
   desc: string;
+  /** What the next level adds (shown on cards for owned perks). */
+  upgrade?: string;
   icon: string;
   color: string;
+  maxLevel: number;
+  /** Risk/reward perk with a drawback. */
+  gambit?: boolean;
+  /** Instant pickup instead of a lasting perk. */
+  reward?: boolean;
+}
+
+/** Daily Challenge rule twists. */
+export type DailyModifierId =
+  | 'fast_bullets'
+  | 'laser_storm'
+  | 'elite_surge'
+  | 'shard_rain'
+  | 'dash_overcharge'
+  | 'early_boss'
+  | 'max_power'
+  | 'swarm';
+
+export interface DailyModifierDef {
+  id: DailyModifierId;
+  name: string;
+  desc: string;
+  color: string;
+}
+
+/** Player options (accessibility, audio, controls). */
+export interface GameSettings {
+  /** Tone full-screen flashes down and stop warning blinks. */
+  reduceFlash: boolean;
+  /** Screen shake strength, 0..1. */
+  shake: number;
+  /** Drag steering multiplier. */
+  sensitivity: number;
+  sfxVolume: number;
+  musicVolume: number;
+  haptics: boolean;
 }
 
 export type BossKind = 'sentinel' | 'gatekeeper' | 'twins' | 'furnace' | 'wraith' | 'singularity' | 'null';
@@ -51,7 +97,19 @@ export interface UpgradeDef {
   icon: string;
 }
 
-export type QuestType = 'nearmiss' | 'combo' | 'dashkill' | 'gems' | 'fever' | 'boss';
+export type QuestType =
+  | 'nearmiss'
+  | 'combo'
+  | 'dashkill'
+  | 'gems'
+  | 'fever'
+  | 'boss'
+  | 'elite'
+  | 'score'
+  | 'wave'
+  | 'graze'
+  | 'perk'
+  | 'daily';
 
 export interface QuestDef {
   id: string;
@@ -59,6 +117,19 @@ export interface QuestDef {
   target: number;
   reward: number;
   label: string;
+  /** Best-in-one-run goal (combo, score, wave) instead of a running total. */
+  absolute?: boolean;
+}
+
+/** Today's three missions. */
+export interface DailyQuestState {
+  /** Local date key, YYYY-MM-DD. */
+  date: string;
+  ids: string[];
+  progress: number[];
+  done: boolean[];
+  /** All three finished and the bonus paid out. */
+  bonusPaid: boolean;
 }
 
 export interface AchievementDef {
@@ -100,19 +171,54 @@ export interface SaveData {
   };
   muted: boolean;
   bgmMuted: boolean;
+  /** Legacy single-quest cursor (pre daily missions), kept so old saves load. */
   questIndex: number;
   questProgress: number;
+  dailyQuests: DailyQuestState;
   unlockedAchievements: string[];
   /** Index of the highest campaign sector unlocked (0-based). */
   campaignUnlocked: number;
   /** Best star rating (0-3) per campaign sector. */
   campaignStars: number[];
+  /** Daily Challenge: today's best, and the play streak. */
+  daily: {
+    date: string;
+    best: number;
+    attempts: number;
+    /** First run of the day already paid its bonus. */
+    rewarded: boolean;
+    streak: number;
+    /** Date of the last day a Daily Challenge was played. */
+    lastPlayed: string;
+    bestStreak: number;
+  };
+  /** Ship Mastery XP per ship id. */
+  shipXp: Record<string, number>;
+  /** Equipped skin index per ship id (0 = factory paint). */
+  shipSkin: Record<string, number>;
+  settings: GameSettings;
+  /** Lifetime elite enemies destroyed. */
+  totalElites: number;
+  /** Times a run was continued with a revive. */
+  totalRevives: number;
 }
 
 export interface HazardEntity {
   id: number;
-  /** 'orb' is a heavy plasma core that can be deflected with a Dash. */
-  type: 'drone' | 'seeker' | 'spinner' | 'turret' | 'shot' | 'orb';
+  /**
+   * 'orb' is a heavy plasma core that can be deflected with a Dash.
+   * 'splitter' bursts into two drones when shot, 'sniper' telegraphs a fast aimed shot,
+   * 'kamikaze' locks on and lunges in a straight line.
+   */
+  type: 'drone' | 'seeker' | 'spinner' | 'turret' | 'shot' | 'orb' | 'splitter' | 'sniper' | 'kamikaze';
+  /** Armoured gold variant: several hits, always drops loot. */
+  elite?: boolean;
+  /** Starting HP, for the pip display. */
+  maxHp?: number;
+  /** Sniper / kamikaze: seconds left of the aim telegraph. */
+  aimTimer?: number;
+  /** Kamikaze: committed to its lunge. */
+  lunging?: boolean;
   x: number;
   y: number;
   vx: number;
@@ -248,8 +354,8 @@ export interface BulletEntity {
   turnRate?: number;
   /** Seconds left before a homing round fizzles. */
   life?: number;
-  /** Prism Bounce perk: already ricocheted off a screen edge. */
-  bounced?: boolean;
+  /** Prism Bounce perk: wall ricochets used so far. */
+  bounces?: number;
 }
 
 export interface ParticleEntity {
