@@ -5,6 +5,8 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // Relative asset paths so the build also works from a sub-path (GitHub Pages: /Plane-War/)
+    base: './',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
