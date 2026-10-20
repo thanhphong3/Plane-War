@@ -1,9 +1,12 @@
 import React from 'react';
 import { Bomb, ChevronsUp, Hourglass, Magnet, Music, Pause, Radio, Shield, Skull, Target, Timer, Volume2, VolumeX, Zap } from 'lucide-react';
 import { LevelDef, SPEAKERS, SpeakerId } from '../game/campaign';
-import { GameMode, QuestDef } from '../types/game';
+import { tr } from '../i18n';
+import { questLabel } from '../i18n/content';
+import { GameMode, PerkId, QuestDef } from '../types/game';
 import { MAX_WEAPON_LEVEL } from '../utils/constants';
 import { ShardIcon } from './Icon';
+import { PerkIcon, perkDef } from './PerkModal';
 
 export interface CommMessage {
   id: number;
@@ -36,6 +39,12 @@ interface HUDProps {
   bossStatus: string;
   /** 0..1 while flying through a campaign sector, -1 otherwise. */
   stageProgress: number;
+  /** Tactical Perks installed this run. */
+  perks: PerkId[];
+  /** Kinetic Capacitor charge 0..1, or -1 without that perk. */
+  grazeCharge: number;
+  /** Boss Rush: current boss (1-based), -1 outside Boss Rush. */
+  bossRush: number;
   level: LevelDef | null;
   comm: CommMessage | null;
   currentQuest: QuestDef;
@@ -90,6 +99,9 @@ export const HUD: React.FC<HUDProps> = ({
   bossName,
   bossStatus,
   stageProgress,
+  perks,
+  grazeCharge,
+  bossRush,
   level,
   comm,
   currentQuest,
@@ -150,7 +162,7 @@ export const HUD: React.FC<HUDProps> = ({
                 {shards.toLocaleString('en-US')}
               </span>
               <span className="text-slate-400 text-[11px] font-bold font-cyber tracking-wider">
-                {level ? level.code : `LV ${waveLevel}`}
+                {level ? level.code : bossRush > 0 ? `BOSS ${bossRush}/7` : `LV ${waveLevel}`}
               </span>
               {gameMode === 'timed' && (
                 <span
@@ -167,16 +179,16 @@ export const HUD: React.FC<HUDProps> = ({
 
           {/* Audio & Pause */}
           <div className="flex items-center gap-1.5 pointer-events-auto">
-            <IconButton onClick={onToggleBgm} label={isBgmMuted ? 'Music on' : 'Music off'}>
+            <IconButton onClick={onToggleBgm} label={isBgmMuted ? tr('Music on', 'Bật nhạc') : tr('Music off', 'Tắt nhạc')}>
               <span className={`relative ${isBgmMuted ? 'opacity-40' : ''}`}>
                 <Music size={16} />
                 {isBgmMuted && <span className="absolute left-1/2 top-1/2 w-5 h-[2px] bg-rose-400 -translate-x-1/2 -translate-y-1/2 rotate-45" />}
               </span>
             </IconButton>
-            <IconButton onClick={onToggleMute} label={isMuted ? 'Sound on' : 'Sound off'}>
+            <IconButton onClick={onToggleMute} label={isMuted ? tr('Sound on', 'Bật âm thanh') : tr('Sound off', 'Tắt âm thanh')}>
               {isMuted ? <VolumeX size={16} className="text-rose-300" /> : <Volume2 size={16} />}
             </IconButton>
-            <IconButton onClick={onPause} label="Pause">
+            <IconButton onClick={onPause} label={tr('Pause', 'Tạm dừng')}>
               <Pause size={16} />
             </IconButton>
           </div>
@@ -185,11 +197,11 @@ export const HUD: React.FC<HUDProps> = ({
         {/* Overdrive Energy */}
         <div className="flex items-center gap-2 mt-2.5">
           <span
-            className={`w-[74px] shrink-0 text-[10px] font-bold uppercase tracking-wider font-cyber ${
+            className={`min-w-[74px] shrink-0 whitespace-nowrap text-[10px] font-bold uppercase tracking-wider font-cyber ${
               isFeverActive ? 'text-amber-300 animate-pulse' : 'text-cyan-300'
             }`}
           >
-            {isFeverActive ? 'Overdrive' : 'Energy'}
+            {isFeverActive ? tr('Overdrive', 'Quá Tải') : tr('Energy', 'Năng lượng')}
           </span>
           <div className="flex-1 h-3 bg-slate-950/90 rounded-full overflow-hidden border border-slate-700/80 p-[2px]">
             <div
@@ -231,6 +243,32 @@ export const HUD: React.FC<HUDProps> = ({
                 <Hourglass size={11} /> {slowFieldTimer.toFixed(0)}s
               </span>
             )}
+          </div>
+        )}
+
+        {/* Tactical Perks */}
+        {perks.length > 0 && (
+          <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+            {perks.map((id) => {
+              const def = perkDef(id);
+              const charging = id === 'graze_shield' && grazeCharge >= 0;
+              return (
+                <span
+                  key={id}
+                  title={`${def.name}: ${def.desc}`}
+                  className="relative w-6 h-6 rounded-md flex items-center justify-center border bg-slate-950/70 overflow-hidden"
+                  style={{ borderColor: `${def.color}80` }}
+                >
+                  {charging && (
+                    <span
+                      className="absolute inset-x-0 bottom-0 transition-[height] duration-150"
+                      style={{ height: `${grazeCharge * 100}%`, backgroundColor: `${def.color}40` }}
+                    />
+                  )}
+                  <PerkIcon id={id} size={13} className="relative" style={{ color: def.color }} />
+                </span>
+              );
+            })}
           </div>
         )}
 
@@ -314,9 +352,9 @@ export const HUD: React.FC<HUDProps> = ({
         {/* Quest tracker */}
         <div className="glass-panel px-3 py-2 rounded-2xl max-w-[190px] sm:max-w-xs">
           <p className="text-[10px] uppercase tracking-wider text-cyan-400 font-bold font-cyber flex items-center gap-1">
-            <Target size={11} /> Mission
+            <Target size={11} /> {tr('Mission', 'Nhiệm vụ')}
           </p>
-          <p className="text-xs font-semibold text-slate-200 leading-tight mt-0.5">{currentQuest.label}</p>
+          <p className="text-xs font-semibold text-slate-200 leading-tight mt-0.5">{questLabel(currentQuest)}</p>
           <div className="flex items-center gap-2 mt-1">
             <div className="flex-1 h-1 rounded-full bg-slate-800 overflow-hidden">
               <div
@@ -329,7 +367,7 @@ export const HUD: React.FC<HUDProps> = ({
             </span>
           </div>
           <span className="text-[10px] font-bold text-amber-300 flex items-center gap-1 mt-0.5">
-            Reward +{currentQuest.reward} <ShardIcon size={10} />
+            {tr('Reward', 'Thưởng')} +{currentQuest.reward} <ShardIcon size={10} />
           </span>
         </div>
 
@@ -339,7 +377,7 @@ export const HUD: React.FC<HUDProps> = ({
             type="button"
             onClick={onTriggerEmp}
             disabled={empBombs <= 0}
-            aria-label="EMP Bomb"
+            aria-label={tr('EMP Bomb', 'Bom EMP')}
             className={`relative w-14 h-14 sm:w-16 sm:h-16 rounded-2xl border-2 flex flex-col items-center justify-center btn-cyber ${
               empBombs > 0
                 ? 'bg-gradient-to-br from-amber-500/30 to-rose-600/40 border-amber-400/80 shadow-lg shadow-amber-500/25'
@@ -357,8 +395,10 @@ export const HUD: React.FC<HUDProps> = ({
             {/* Dash coach bubble: says what the button does right when it's worth pressing */}
             {dashHint && (
               <div className="absolute bottom-full right-0 mb-2 w-max max-w-[160px] px-2.5 py-1.5 rounded-xl bg-cyan-950/90 border border-cyan-300/70 shadow-lg shadow-cyan-500/30 text-right anim-pop">
-                <p className="text-[11px] font-black font-cyber text-cyan-100 tracking-wider leading-tight">DASH NOW!</p>
-                <p className="text-[10px] text-cyan-200/90 leading-tight mt-0.5">Ram the marked enemy — you can't be hurt mid-dash</p>
+                <p className="text-[11px] font-black font-cyber text-cyan-100 tracking-wider leading-tight">{tr('DASH NOW!', 'LƯỚT NGAY!')}</p>
+                <p className="text-[10px] text-cyan-200/90 leading-tight mt-0.5">
+                  {tr("Ram the marked enemy — you can't be hurt mid-dash", 'Húc kẻ địch được đánh dấu — đang Lướt thì không ai làm gì được bạn')}
+                </p>
                 <span className="absolute -bottom-1.5 right-8 w-3 h-3 rotate-45 bg-cyan-950 border-r border-b border-cyan-300/70" />
               </div>
             )}
@@ -366,8 +406,14 @@ export const HUD: React.FC<HUDProps> = ({
               type="button"
               onClick={onTriggerDash}
               disabled={!dashReady}
-              aria-label="Hyper Dash: short invincible burst that smashes enemies"
-              title="Hyper Dash (double-tap / Space): short invincible burst. Ram enemies to smash them, ram Plasma Cores to send them back."
+              aria-label={tr(
+                'Hyper Dash: short invincible burst that smashes enemies',
+                'Siêu Lướt: lao vút bất tử trong chốc lát, húc nát kẻ địch'
+              )}
+              title={tr(
+                'Hyper Dash (double-tap / Space): short invincible burst. Ram enemies to smash them, ram Plasma Cores to send them back.',
+                'Siêu Lướt (chạm đúp / Space): lao vút bất tử trong chốc lát. Húc nát kẻ địch, húc Lõi Plasma để bắn ngược lại.'
+              )}
               className={`relative w-[76px] h-[76px] sm:w-[84px] sm:h-[84px] rounded-full flex flex-col items-center justify-center btn-cyber ${
                 dashReady ? 'bg-cyan-500/25 dash-ready' : 'bg-slate-900/80'
               } ${dashHint ? 'ring-4 ring-cyan-300/60' : ''}`}
@@ -390,7 +436,7 @@ export const HUD: React.FC<HUDProps> = ({
               <span
                 className={`text-[10px] font-black font-cyber tabular-nums ${dashReady ? 'text-cyan-100' : 'text-slate-400'}`}
               >
-                {dashReady ? 'DASH' : `${dashCooldown.toFixed(1)}s`}
+                {dashReady ? tr('DASH', 'LƯỚT') : `${dashCooldown.toFixed(1)}s`}
               </span>
             </button>
           </div>

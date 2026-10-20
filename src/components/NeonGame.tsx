@@ -5,9 +5,11 @@ import { LEVELS, LevelDef, SpeakerId, computeStars } from '../game/campaign';
 import { EngineState, createEngineState, fieldScale } from '../game/engine';
 import { HudSnapshot, HudStore, createHudStore } from '../game/hudStore';
 import { renderScene } from '../game/scene';
-import { BossEntity, BossKind, GameMode, GameState, QuestType, SaveData, ShipDef } from '../types/game';
+import { tr, useLang } from '../i18n';
+import { localLevel, questLabel } from '../i18n/content';
+import { BossEntity, BossKind, BulletEntity, GameMode, GameState, PerkId, QuestType, SaveData, ShipDef } from '../types/game';
 import { sound } from '../utils/audio';
-import { DASH_COACH_SMASHES, MAX_WEAPON_LEVEL, QUESTS, SHIPS } from '../utils/constants';
+import { BOSS_RUSH_ORDER, DASH_COACH_SMASHES, MAX_WEAPON_LEVEL, PERKS, QUESTS, SHIPS } from '../utils/constants';
 import { loadGameSave, saveGameData } from '../utils/storage';
 import { AchievementsModal } from './AchievementsModal';
 import { CampaignMap } from './CampaignMap';
@@ -15,6 +17,7 @@ import { GameOverModal, GameOverStats } from './GameOverModal';
 import { CommMessage, HUD } from './HUD';
 import { LevelClearModal, LevelClearStats } from './LevelClearModal';
 import { MainMenu } from './MainMenu';
+import { PerkModal } from './PerkModal';
 import { PauseModal } from './PauseModal';
 import { ShopModal } from './ShopModal';
 import { StoryScreen } from './StoryScreen';
@@ -29,6 +32,22 @@ const bossReady = (b: BossEntity) => b.entered && b.timeLeft > 0;
 
 /** Raises the auto-blaster's Weapon Power by one level (lost again when a shield breaks). */
 const POWER_PICKUP = { kind: 'power' as const, color: '#fb923c', label: 'WEAPON POWER' };
+
+/** Fire-interval multiplier per ship: heavier signature rounds cycle a little slower. */
+const WEAPON_RATE: Record<string, number> = { striker: 1, phantom: 1, phoenix: 1.15, vortex: 1.2, sovereign: 1 };
+
+/** Support pickup labels (read at call time so they follow the language). */
+const pickupDef = (kind: 'shield' | 'magnet' | 'slow' | 'bomb' | 'power') =>
+  ({
+    shield: { kind: 'shield' as const, color: '#38bdf8', label: tr('ENERGY SHIELD', 'KHIÊN NĂNG LƯỢNG') },
+    magnet: { kind: 'magnet' as const, color: '#a855f7', label: tr('MEGA MAGNET', 'SIÊU NAM CHÂM') },
+    slow: { kind: 'slow' as const, color: '#34d399', label: tr('TIME WARP', 'BẺ CONG THỜI GIAN') },
+    bomb: { kind: 'bomb' as const, color: '#fbbf24', label: tr('+1 EMP BOMB', '+1 BOM EMP') },
+    power: POWER_PICKUP,
+  })[kind];
+
+/** Modes that offer mid-run Tactical Perks. */
+const perkMode = (mode: GameMode) => mode === 'endless' || mode === 'hardcore' || mode === 'bossrush';
 
 /** Endless/Timed speed stops ramping here; later waves get denser instead of faster. */
 const SPEED_CAP_WAVE = 9;
@@ -63,6 +82,8 @@ const withRunTotals = (cur: SaveData, e: EngineState): SaveData => ({
 });
 
 export const NeonGame: React.FC = () => {
+  // Re-render every screen when the language is switched
+  useLang();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Persistence State
@@ -115,6 +136,9 @@ export const NeonGame: React.FC = () => {
       bossStatus: '',
       stageProgress: -1,
       questProgress: saveData.questProgress,
+      perks: [],
+      grazeCharge: -1,
+      bossRush: -1,
     })
   );
   const [hudComm, setHudComm] = useState<CommMessage | null>(null);
@@ -137,7 +161,12 @@ export const NeonGame: React.FC = () => {
     previousBest: 0,
     reason: 'crashed',
     reachedBoss: false,
+    bossRush: null,
   });
+
+  // Tactical Perk picker
+  const [perkOffer, setPerkOffer] = useState<PerkId[]>([]);
+  const [perkSubtitle, setPerkSubtitle] = useState('');
 
   // Sound toggles
   const [isMuted, setIsMuted] = useState(saveData.muted);
@@ -246,7 +275,7 @@ export const NeonGame: React.FC = () => {
         shards: cur.shards + reward,
         unlockedAchievements: [...cur.unlockedAchievements, achievementId],
       });
-      showToast(`Reward claimed: +${reward} shards!`);
+      showToast(tr(`Reward claimed: +${reward} shards!`, `Đã nhận thưởng: +${reward} mảnh!`));
     },
     [updateSave, showToast]
   );
@@ -276,7 +305,9 @@ export const NeonGame: React.FC = () => {
           questProgress: 0,
         });
         sound.playSound('powerup');
-        showToast(`Mission complete: ${q.label}! +${q.reward} shards`);
+        showToast(
+          tr(`Mission complete: ${q.label}! +${q.reward} shards`, `Hoàn thành nhiệm vụ: ${questLabel(q)}! +${q.reward} mảnh`)
+        );
       } else {
         e.questProgress = newProg;
       }
@@ -296,7 +327,8 @@ export const NeonGame: React.FC = () => {
 
   /** The current campaign sector, or null outside the campaign. */
   const getLevel = useCallback((): LevelDef | null => {
-    return gameModeRef.current === 'campaign' ? LEVELS[levelIndexRef.current] || null : null;
+    const level = gameModeRef.current === 'campaign' ? LEVELS[levelIndexRef.current] : undefined;
+    return level ? localLevel(level) : null;
   }, []);
 
   /** Wired up inside the render loop; lets abilities outside the loop talk to the boss. */
@@ -305,9 +337,16 @@ export const NeonGame: React.FC = () => {
   /** Music intensity follows what is happening on screen. */
   const refreshMusic = useCallback(() => {
     const e = engineRef.current;
-    if (gameStateRef.current !== 'PLAYING') sound.setIntensity(0);
-    else if (e.isFeverActive || e.boss) sound.setIntensity(2);
-    else sound.setIntensity(1);
+    const st = gameStateRef.current;
+    if (st !== 'PLAYING' && st !== 'PERK_SELECT') {
+      sound.setIntensity(0);
+      sound.setBgmIntensity('normal');
+      return;
+    }
+    sound.setIntensity(1);
+    if (e.isFeverActive) sound.setBgmIntensity('fever');
+    else if (e.boss || gameModeRef.current === 'bossrush') sound.setBgmIntensity('boss');
+    else sound.setBgmIntensity('normal');
   }, []);
 
   // ========================================================
@@ -382,6 +421,11 @@ export const NeonGame: React.FC = () => {
     e.player.dashCooldown = e.player.dashMaxCooldown;
     e.player.invulnTimer = Math.max(e.player.invulnTimer, 0.45);
     e.player.bossContactCd = 0;
+    // Holo Echo: leave a decoy where the Dash started
+    if (e.activePerks.includes('dash_decoy')) {
+      if (e.decoys.length >= 3) e.decoys.shift();
+      e.decoys.push({ x: e.player.x, y: e.player.y, life: 2.5, maxLife: 2.5 });
+    }
 
     sound.playSound('dash');
     sound.triggerHaptic(30);
@@ -389,8 +433,8 @@ export const NeonGame: React.FC = () => {
 
     addShockwave(e.player.x, e.player.y, '#22d3ee', 120);
     spawnParticles(e.player.x, e.player.y, '#22d3ee', 18, 260, true);
-    addFloatingText(e.player.x, e.player.y - 26, 'HYPER DASH!', '#67e8f9', 16);
-    addFloatingText(e.player.x, e.player.y - 8, 'INVINCIBLE', '#cffafe', 10);
+    addFloatingText(e.player.x, e.player.y - 26, tr('HYPER DASH!', 'SIÊU LƯỚT!'), '#67e8f9', 16);
+    addFloatingText(e.player.x, e.player.y - 8, tr('INVINCIBLE', 'BẤT TỬ'), '#cffafe', 10);
   }, [getActiveShip, spawnParticles, addFloatingText, addShockwave]);
 
   /** Lifetime Dash smashes drive the in-run coaching; celebrate the very first one. */
@@ -398,7 +442,7 @@ export const NeonGame: React.FC = () => {
     const e = engineRef.current;
     e.dashSmashesThisRun++;
     if (saveDataRef.current.totalDashSmashes + e.dashSmashesThisRun === 1) {
-      showCenterBanner('DASH SMASH! NOTHING HURTS YOU MID-DASH', 'neon-glow-cyan');
+      showCenterBanner(tr('DASH SMASH! NOTHING HURTS YOU MID-DASH', 'LƯỚT HÚC! ĐANG LƯỚT THÌ KHÔNG GÌ HẠI ĐƯỢC BẠN'), 'neon-glow-cyan');
     }
   }, [showCenterBanner]);
 
@@ -407,16 +451,21 @@ export const NeonGame: React.FC = () => {
     const b = e.boss;
     if (!b) return;
     const campaign = gameModeRef.current === 'campaign';
+    const rush = gameModeRef.current === 'bossrush';
     e.boss = null;
     e.bossKillsThisRun++;
     e.nextBossTime = e.elapsedRunTime + 60;
+    if (rush) e.bossRushIndex++;
+    const rushWon = rush && e.bossRushIndex >= BOSS_RUSH_ORDER.length;
+    /** The fight that ends the run: the whole field goes quiet. */
+    const finale = campaign || rushWon;
 
     sound.playSound('boss_down');
     sound.triggerHaptic([60, 40, 120]);
     e.screenShake = 26;
     flashScreen('#ffffff', 0.75);
     e.slowMoFactor = 0.35;
-    e.slowMoTimer = campaign ? 1.2 : 0.6;
+    e.slowMoTimer = finale ? 1.2 : 0.6;
 
     for (let k = 0; k < 4; k++) {
       addShockwave(b.x, b.y, k % 2 ? b.color : '#fbbf24', 160 + k * 110, 5 - k);
@@ -430,16 +479,31 @@ export const NeonGame: React.FC = () => {
 
     // Bullet cancel: every enemy shot turns into sparks (the whole sector goes quiet in the campaign)
     e.hazards = e.hazards.filter((h) => {
-      if (!campaign && h.type !== 'shot' && h.type !== 'orb') return true;
+      if (!finale && h.type !== 'shot' && h.type !== 'orb') return true;
       spawnParticles(h.x, h.y, h.type === 'shot' ? h.color : '#fbbf24', 3, 90);
       return false;
     });
     e.lasers = [];
     e.powerups = e.powerups.filter((pu) => pu.kind !== 'key');
-    if (campaign) {
+    if (finale) {
       e.stagePhase = 'clear';
       e.clearTimer = CLEAR_DELAY;
       e.player.invulnTimer = Math.max(e.player.invulnTimer, CLEAR_DELAY + 1);
+      e.bossRushWon = rushWon;
+      e.perkPendingTimer = 0;
+    } else if (rush) {
+      // Intermission: bounty, a support drop, then a perk before the next boss
+      e.bossRushTimer = 4;
+      e.runShardsEarned += 15 + e.bossRushIndex * 8;
+      const p = e.player;
+      const drop = pickupDef(p.shieldCount < 2 ? 'shield' : p.weaponLevel < MAX_WEAPON_LEVEL ? 'power' : 'bomb');
+      e.powerups.push({ id: e.entityIdCounter++, x: b.x, y: b.y, vy: 90, r: 17, pulse: 0, ...drop });
+    }
+    if (!finale && perkMode(gameModeRef.current)) {
+      e.perkPendingTimer = 1.3;
+      e.perkReason = rush
+        ? tr(`Boss ${e.bossRushIndex}/${BOSS_RUSH_ORDER.length} down`, `Đã hạ boss ${e.bossRushIndex}/${BOSS_RUSH_ORDER.length}`)
+        : tr(`${b.name} destroyed`, `Đã phá ${b.name}`);
     }
 
     // Shard fountain
@@ -463,7 +527,16 @@ export const NeonGame: React.FC = () => {
     e.score += bonus;
     addFloatingText(b.x, b.y, `+${bonus.toLocaleString('en-US')}`, '#fde047', 26);
     showCenterBanner(
-      campaign ? `${b.name} DEFEATED!` : `SENTINEL DESTROYED! +${bonus.toLocaleString('en-US')}`,
+      rushWon
+        ? tr('BOSS RUSH COMPLETE!', 'PHÁ ĐẢO BOSS RUSH!')
+        : rush
+        ? tr(
+            `${b.name} DOWN! ${e.bossRushIndex}/${BOSS_RUSH_ORDER.length}`,
+            `ĐÃ HẠ ${b.name}! ${e.bossRushIndex}/${BOSS_RUSH_ORDER.length}`
+          )
+        : campaign
+        ? tr(`${b.name} DEFEATED!`, `ĐÃ HẠ ${b.name}!`)
+        : tr(`SENTINEL DESTROYED! +${bonus.toLocaleString('en-US')}`, `ĐÃ PHÁ LÍNH CANH! +${bonus.toLocaleString('en-US')}`),
       'neon-glow-amber'
     );
     advanceQuest('boss', 1, false);
@@ -511,10 +584,30 @@ export const NeonGame: React.FC = () => {
 
     const bonus = converted * 80 * e.combo;
     e.score += bonus;
-    showCenterBanner(`EMP BLAST! +${bonus.toLocaleString('en-US')}`, 'neon-glow-amber');
+    showCenterBanner(`${tr('EMP BLAST!', 'NỔ EMP!')} +${bonus.toLocaleString('en-US')}`, 'neon-glow-amber');
     // After the banner so boss-specific EMP reactions can override it
     if (e.boss && bossApiRef.current && bossReady(e.boss)) BOSSES[e.boss.kind].emp(e.boss, bossApiRef.current);
   }, [spawnParticles, showCenterBanner, addShockwave, flashScreen]);
+
+  /** Supernova Core: Overdrive starting or ending wipes every enemy bullet. */
+  const novaBlast = useCallback(() => {
+    const e = engineRef.current;
+    if (!e.activePerks.includes('overdrive_nova') || e.isDying) return;
+    const p = e.player;
+    let n = 0;
+    e.hazards = e.hazards.filter((h) => {
+      if (h.type !== 'shot' && !(h.type === 'orb' && !h.reflected)) return true;
+      spawnParticles(h.x, h.y, '#fde047', 2, 90);
+      n++;
+      return false;
+    });
+    sound.playSound('boom');
+    flashScreen('#fde047', 0.3);
+    addShockwave(p.x, p.y, '#fbbf24', Math.max(e.W, e.H) * 1.1, 7);
+    addShockwave(p.x, p.y, '#ffffff', Math.max(e.W, e.H) * 0.6, 3);
+    e.score += n * 15 * e.combo;
+    addFloatingText(p.x, p.y - 44, `${tr('SUPERNOVA!', 'SIÊU TÂN TINH!')} ×${n}`, '#fde047', 16);
+  }, [spawnParticles, flashScreen, addShockwave, addFloatingText]);
 
   const activateFeverMode = useCallback(() => {
     const e = engineRef.current;
@@ -532,10 +625,11 @@ export const NeonGame: React.FC = () => {
     addShockwave(e.player.x, e.player.y, '#f43f5e', 280, 5);
     addShockwave(e.player.x, e.player.y, '#fbbf24', 200, 3);
 
-    showCenterBanner('OVERDRIVE! SMASH EVERYTHING!', 'neon-glow-amber');
+    showCenterBanner(tr('OVERDRIVE! SMASH EVERYTHING!', 'QUÁ TẢI! HÚC NÁT TẤT CẢ!'), 'neon-glow-amber');
     advanceQuest('fever', 1, false);
+    novaBlast();
     refreshMusic();
-  }, [advanceQuest, showCenterBanner, addShockwave, flashScreen, refreshMusic]);
+  }, [advanceQuest, showCenterBanner, addShockwave, flashScreen, refreshMusic, novaBlast]);
 
   const addFeverEnergy = useCallback(
     (amt: number) => {
@@ -609,14 +703,18 @@ export const NeonGame: React.FC = () => {
     (kind: BossKind = 'sentinel') => {
       const e = engineRef.current;
       const level = getLevel();
+      const rush = gameModeRef.current === 'bossrush';
+      // Boss Rush borrows each Warden's campaign tuning; its Sentinel is a fixed MK-2
+      const rushSrc = rush ? LEVELS.find((l) => l.boss === kind) : undefined;
+      const def = level ?? (rushSrc ? localLevel(rushSrc) : null);
       e.bossCount++;
-      const tier = level ? level.id + 1 : e.bossCount;
+      const tier = def ? def.id + 1 : rush ? 2 : e.bossCount;
       const hard = gameModeRef.current === 'hardcore';
-      const maxHp = level ? level.bossHp : Math.round((60 + tier * 35) * (hard ? 1.3 : 1));
+      const maxHp = def ? def.bossHp : Math.round((60 + tier * 35) * (hard ? 1.3 : 1));
       const b: BossEntity = {
         kind,
-        name: level ? level.bossName : `SENTINEL MK-${tier}`,
-        color: level ? level.accent : '#e879f9',
+        name: def ? def.bossName : `${tr('SENTINEL', 'LÍNH CANH')} MK-${tier}`,
+        color: def ? def.accent : '#e879f9',
         x: e.W / 2,
         y: -120,
         targetY: Math.max(200, e.H * 0.27),
@@ -628,7 +726,7 @@ export const NeonGame: React.FC = () => {
         attackTimer: 1.6,
         attackIndex: 0,
         hitFlash: 0,
-        timeLeft: level ? Infinity : 38,
+        timeLeft: def || rush ? Infinity : 38,
         level: tier,
         entered: false,
         phase: 1,
@@ -642,8 +740,13 @@ export const NeonGame: React.FC = () => {
       sound.playSound('boss_alarm');
       sound.triggerHaptic([50, 50, 50]);
       flashScreen('#f43f5e', 0.25);
-      showCenterBanner(`WARNING: ${b.name} INBOUND`, 'neon-glow-pink');
-      if (level) level.bossIntro.forEach((line) => showComm(line.who, line.text));
+      showCenterBanner(
+        rush
+          ? `${tr('BOSS', 'BOSS')} ${e.bossRushIndex + 1}/${BOSS_RUSH_ORDER.length} — ${b.name}`
+          : tr(`WARNING: ${b.name} INBOUND`, `CẢNH BÁO: ${b.name} ĐANG TỚI`),
+        'neon-glow-pink'
+      );
+      if (def) def.bossIntro.forEach((line) => showComm(line.who, line.text));
       refreshMusic();
     },
     [flashScreen, getLevel, refreshMusic, showCenterBanner, showComm]
@@ -820,10 +923,10 @@ export const NeonGame: React.FC = () => {
   const spawnPowerup = useCallback(() => {
     const e = engineRef.current;
     const types = [
-      { kind: 'shield' as const, color: '#38bdf8', label: 'ENERGY SHIELD' },
-      { kind: 'magnet' as const, color: '#a855f7', label: 'MEGA MAGNET' },
-      { kind: 'slow' as const, color: '#34d399', label: 'TIME WARP' },
-      { kind: 'bomb' as const, color: '#fbbf24', label: '+1 EMP BOMB' },
+      { kind: 'shield' as const, color: '#38bdf8', label: tr('ENERGY SHIELD', 'KHIÊN NĂNG LƯỢNG') },
+      { kind: 'magnet' as const, color: '#a855f7', label: tr('MEGA MAGNET', 'SIÊU NAM CHÂM') },
+      { kind: 'slow' as const, color: '#34d399', label: tr('TIME WARP', 'BẺ CONG THỜI GIAN') },
+      { kind: 'bomb' as const, color: '#fbbf24', label: tr('+1 EMP BOMB', '+1 BOM EMP') },
     ];
     // Weapon Power shows up often until the blaster is maxed out
     const chosen =
@@ -854,7 +957,7 @@ export const NeonGame: React.FC = () => {
   // Damage & Game Lifecycle
   // ========================================================
   const finishGameOver = useCallback(
-    (reason: 'crashed' | 'timeup') => {
+    (reason: 'crashed' | 'timeup' | 'victory') => {
       const e = engineRef.current;
       setGameState('GAMEOVER');
       gameStateRef.current = 'GAMEOVER';
@@ -865,24 +968,38 @@ export const NeonGame: React.FC = () => {
       if (reason === 'timeup') {
         sound.playSound('wave');
         flashScreen('#e879f9', 0.4);
+      } else if (reason === 'victory') {
+        sound.playSound('perk_pick');
+        flashScreen('#fde047', 0.4);
       }
 
       clearComms();
       const cur = saveDataRef.current;
       const finalScore = Math.floor(e.score);
       const campaign = gameModeRef.current === 'campaign';
+      const rush = gameModeRef.current === 'bossrush';
       const bestKey =
         gameModeRef.current === 'timed'
           ? 'bestTimed'
           : gameModeRef.current === 'hardcore'
           ? 'bestHardcore'
+          : rush
+          ? 'bestBossRush'
           : 'bestEndless';
       const previousBest = campaign ? 0 : cur[bestKey];
       const isNewRecord = !campaign && finalScore > previousBest;
 
+      // Boss Rush: a full clear pays a big bounty and may set a new fastest time
+      const won = rush && reason === 'victory';
+      if (won) e.runShardsEarned += 250;
+      const clearTime = e.elapsedRunTime;
+      const prevTime = cur.bestBossRushTime;
+      const newBestTime = won && (prevTime <= 0 || clearTime < prevTime);
+
       updateSave({
         ...withRunTotals(cur, e),
         ...(campaign ? {} : { [bestKey]: Math.max(previousBest, finalScore) }),
+        ...(newBestTime ? { bestBossRushTime: clearTime } : {}),
         totalRuns: cur.totalRuns + 1,
         shards: cur.shards + e.runShardsEarned,
       });
@@ -898,6 +1015,15 @@ export const NeonGame: React.FC = () => {
         previousBest,
         reason,
         reachedBoss: campaign && e.stagePhase === 'boss',
+        bossRush: rush
+          ? {
+              cleared: Math.min(BOSS_RUSH_ORDER.length, Math.max(0, e.bossRushIndex)),
+              total: BOSS_RUSH_ORDER.length,
+              time: clearTime,
+              bestTime: newBestTime ? clearTime : prevTime,
+              newBestTime,
+            }
+          : null,
       });
     },
     [updateSave, refreshMusic, flashScreen, clearComms]
@@ -936,10 +1062,10 @@ export const NeonGame: React.FC = () => {
       flashScreen('#38bdf8', 0.3);
       addShockwave(e.player.x, e.player.y, '#38bdf8', 190, 4);
       spawnParticles(e.player.x, e.player.y, '#38bdf8', 22, 240, true);
-      addFloatingText(e.player.x, e.player.y - 22, 'SHIELD BROKEN!', '#7dd3fc', 15);
+      addFloatingText(e.player.x, e.player.y - 22, tr('SHIELD BROKEN!', 'VỠ KHIÊN!'), '#7dd3fc', 15);
       if (e.player.weaponLevel > 1) {
         e.player.weaponLevel--;
-        addFloatingText(e.player.x, e.player.y + 26, `POWER DOWN · LV ${e.player.weaponLevel}`, POWER_PICKUP.color, 13);
+        addFloatingText(e.player.x, e.player.y + 26, `${tr('POWER DOWN', 'HỎA LỰC GIẢM')} · LV ${e.player.weaponLevel}`, POWER_PICKUP.color, 13);
       }
       return false;
     }
@@ -975,8 +1101,55 @@ export const NeonGame: React.FC = () => {
       bossStatus: e.boss && bossReady(e.boss) ? e.boss.status : '',
       stageProgress: level && e.stagePhase === 'stage' ? Math.min(1, e.stageTimer / level.stageTime) : -1,
       questProgress: e.questProgress,
+      perks: e.activePerks,
+      grazeCharge: e.activePerks.includes('graze_shield') ? e.grazeCounterForShield / 18 : -1,
+      bossRush: e.bossRushIndex >= 0 ? Math.min(BOSS_RUSH_ORDER.length, e.bossRushIndex + 1) : -1,
     });
   }, [getLevel, hudStore]);
+
+  /** Rolls three perks the pilot doesn't own yet and opens the picker. Returns false if none are left. */
+  const openPerkSelect = useCallback((): boolean => {
+    const e = engineRef.current;
+    const pool = PERKS.map((pk) => pk.id).filter((id) => !e.activePerks.includes(id));
+    if (pool.length === 0) return false;
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    e.perkOffer = pool.slice(0, 3);
+    e.pointerActive = false;
+    e.touchId = -1;
+    e.keys = {};
+    setPerkOffer(e.perkOffer);
+    setPerkSubtitle(e.perkReason);
+    setGameState('PERK_SELECT');
+    gameStateRef.current = 'PERK_SELECT';
+    sound.playSound('wave');
+    refreshMusic();
+    return true;
+  }, [refreshMusic]);
+
+  const pickPerk = useCallback(
+    (id: PerkId) => {
+      if (gameStateRef.current !== 'PERK_SELECT') return;
+      const e = engineRef.current;
+      const p = e.player;
+      if (!e.activePerks.includes(id)) e.activePerks.push(id);
+      e.perkOffer = [];
+      // A moment of safety to get your bearings after the freeze
+      p.invulnTimer = Math.max(p.invulnTimer, 1.2);
+      const def = PERKS.find((pk) => pk.id === id);
+      sound.playSound('perk_pick');
+      sound.triggerHaptic([20, 20, 40]);
+      addShockwave(p.x, p.y, def?.color || '#67e8f9', 160, 4);
+      spawnParticles(p.x, p.y, def?.color || '#67e8f9', 20, 240, true);
+      setGameState('PLAYING');
+      gameStateRef.current = 'PLAYING';
+      refreshMusic();
+      syncHud();
+    },
+    [addShockwave, spawnParticles, refreshMusic, syncHud]
+  );
 
   /** Starts a run. In the campaign, `fromBoss` skips straight to the sector's Warden. */
   const startGame = useCallback((fromBoss = false) => {
@@ -987,6 +1160,7 @@ export const NeonGame: React.FC = () => {
     const e = engineRef.current;
     const ship = getActiveShip();
     const timed = gameModeRef.current === 'timed';
+    const rush = gameModeRef.current === 'bossrush';
     const level = getLevel();
 
     e.score = 0;
@@ -1018,6 +1192,18 @@ export const NeonGame: React.FC = () => {
     e.bossCount = 0;
     e.bossKillsThisRun = 0;
     e.nextBossTime = timed ? 26 : 55;
+    e.bossRushIndex = rush ? 0 : -1;
+    e.bossRushTimer = rush ? 2.4 : 0;
+    e.bossRushWon = false;
+
+    e.activePerks = [];
+    e.perkPendingTimer = 0;
+    e.perkOffer = [];
+    e.perkReason = '';
+    e.perkWaveMilestone = 0;
+    e.grazeCounterForShield = 0;
+    e.missileTimer = 0;
+    e.decoys = [];
 
     e.stagePhase = 'stage';
     e.stageTimer = level && fromBoss ? level.stageTime - 1.5 : 0;
@@ -1026,6 +1212,7 @@ export const NeonGame: React.FC = () => {
     e.clearTimer = 0;
     e.skippedStage = !!level && fromBoss;
     if (level) e.waveLevel = level.wave;
+    if (rush) e.waveLevel = 2;
 
     e.player.x = e.W / 2;
     e.player.y = e.H * 0.76;
@@ -1034,12 +1221,12 @@ export const NeonGame: React.FC = () => {
     e.player.trail = [];
     // Campaign pilots get one extra layer of hull plating
     e.player.shieldCount =
-      (ship.stats.bonusShield && gameModeRef.current !== 'hardcore' ? 1 : 0) + (level ? 1 : 0);
+      (ship.stats.bonusShield && gameModeRef.current !== 'hardcore' ? 1 : 0) + (level || rush ? 1 : 0);
     e.player.empBombs = ship.id === 'sovereign' ? 2 : 1;
     // Weapon Primer upgrades, plus a head start in the late campaign sectors
     e.player.weaponLevel = Math.min(
       MAX_WEAPON_LEVEL,
-      1 + (saveDataRef.current.upgrades.primer || 0) + (level ? Math.floor(level.id / 3) : 0)
+      Math.max(rush ? 3 : 1, 1 + (saveDataRef.current.upgrades.primer || 0) + (level ? Math.floor(level.id / 3) : 0))
     );
     e.player.magnetTimer = 0;
     e.player.slowFieldTimer = 0;
@@ -1048,6 +1235,13 @@ export const NeonGame: React.FC = () => {
     e.player.dashMaxCooldown = dashCooldownFor(ship, saveDataRef.current);
     e.player.invulnTimer = 1.0;
     e.player.bossContactCd = 0;
+    e.player.volley = 0;
+    e.player.muzzleFlash = 0;
+    e.player.autoFireTimer = 0;
+    for (const [k, d] of e.player.drones.entries()) {
+      d.x = e.player.x + (k ? 34 : -34);
+      d.y = e.player.y + 10;
+    }
 
     e.hazards = [];
     e.lasers = [];
@@ -1057,6 +1251,7 @@ export const NeonGame: React.FC = () => {
     e.particles = [];
     e.shockwaves = [];
     e.floatingTexts = [];
+    e.grazeArcs = [];
 
     e.hazardTimer = 0.4;
     e.gemTimer = 0.2;
@@ -1074,10 +1269,12 @@ export const NeonGame: React.FC = () => {
       level
         ? `${level.code} — ${level.name.toUpperCase()}`
         : timed
-        ? '60 SECOND BLITZ — GO GO GO!'
+        ? tr('60 SECOND BLITZ — GO GO GO!', 'TỐC CHIẾN 60 GIÂY — LÊN NÀO!')
+        : rush
+        ? tr('BOSS RUSH — 7 BOSSES, ONE LIFE', 'BOSS RUSH — 7 BOSS, MỘT MẠNG')
         : gameModeRef.current === 'hardcore'
-        ? 'HARDCORE — x2 SHARDS!'
-        : 'DRAG TO FLY • DOUBLE-TAP TO DASH',
+        ? tr('HARDCORE — x2 SHARDS!', 'CỰC HẠN — x2 MẢNH!')
+        : tr('DRAG TO FLY • DOUBLE-TAP TO DASH', 'KÉO ĐỂ BAY • CHẠM ĐÚP ĐỂ LƯỚT'),
       'neon-glow-cyan'
     );
   }, [getActiveShip, getLevel, showCenterBanner, refreshMusic, addShockwave, clearComms, syncHud]);
@@ -1134,7 +1331,7 @@ export const NeonGame: React.FC = () => {
     e.nearMissesThisRun = 0;
     e.dashSmashesThisRun = 0;
     e.bossKillsThisRun = 0;
-    if (banked > 0) showToast(`+${banked} shards banked from that run`);
+    if (banked > 0) showToast(tr(`+${banked} shards banked from that run`, `Đã cất +${banked} mảnh từ lượt vừa rồi`));
   }, [updateSave, showToast]);
 
   // ========================================================
@@ -1369,6 +1566,270 @@ export const NeonGame: React.FC = () => {
       if (b && bossReady(b)) BOSSES[b.kind].graze?.(b, api, amount);
     };
 
+    const hasPerk = (id: PerkId) => engineRef.current.activePerks.includes(id);
+
+    /** Electric arc FX (graze sparks, Static Aftershock). */
+    const pushArc = (x1: number, y1: number, x2: number, y2: number, color: string) => {
+      const e = engineRef.current;
+      if (e.grazeArcs.length > 30) e.grazeArcs.shift();
+      e.grazeArcs.push({ x1, y1, x2, y2, color, alpha: 1 });
+    };
+
+    /** Every graze feeds Kinetic Capacitor; 18 of them forge a shield layer. */
+    const chargeGrazeShield = () => {
+      const e = engineRef.current;
+      if (!hasPerk('graze_shield')) return;
+      e.grazeCounterForShield++;
+      if (e.grazeCounterForShield < 18) return;
+      e.grazeCounterForShield = 0;
+      const p = e.player;
+      if (p.shieldCount >= 3) {
+        e.score += 250 * e.combo;
+        addFloatingText(p.x, p.y - 34, tr('CAPACITOR FULL +SCORE', 'TỤ ĐẦY +ĐIỂM'), '#7dd3fc', 13);
+        return;
+      }
+      p.shieldCount++;
+      sound.playSound('powerup');
+      addShockwave(p.x, p.y, '#38bdf8', 110, 3);
+      spawnParticles(p.x, p.y, '#7dd3fc', 14, 200, true);
+      addFloatingText(p.x, p.y - 34, tr('KINETIC SHIELD +1', 'KHIÊN ĐỘNG NĂNG +1'), '#7dd3fc', 15);
+    };
+
+    const nearestDecoy = (x: number, y: number, range: number) => {
+      let best: { x: number; y: number } | null = null;
+      let bestD = range;
+      for (const d of engineRef.current.decoys) {
+        const dist = Math.hypot(d.x - x, d.y - y);
+        if (dist < bestD) {
+          bestD = dist;
+          best = d;
+        }
+      }
+      return best;
+    };
+
+    /** Static Aftershock: when a Dash ends, lightning jumps to the 3 closest enemies (or zaps the boss). */
+    const staticAftershock = () => {
+      const e = engineRef.current;
+      const p = e.player;
+      const near = e.hazards
+        .filter((h) => h.type !== 'shot' && h.type !== 'orb' && h.y > 0 && Math.hypot(h.x - p.x, h.y - p.y) < 280)
+        .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))
+        .slice(0, 3);
+      for (const h of near) {
+        pushArc(p.x, p.y, h.x, h.y, '#67e8f9');
+        const j = e.hazards.indexOf(h);
+        if (j >= 0) damageHazard(j, 4);
+      }
+      const boss = e.boss;
+      let zappedBoss = false;
+      if (near.length < 3 && boss && bossReady(boss) && Math.hypot(boss.x - p.x, boss.y - p.y) < 320) {
+        pushArc(p.x, p.y, boss.x, boss.y, '#67e8f9');
+        const zap: BulletEntity = { id: -1, x: boss.x, y: boss.y, vx: 0, vy: -1, color: '#67e8f9', damage: 3, kind: 'plasma' };
+        zappedBoss = BOSSES[boss.kind].bullet(boss, api, zap) === 'hit';
+      }
+      if (near.length > 0 || zappedBoss) {
+        sound.playSound('parry');
+        e.screenShake = Math.max(e.screenShake, 6);
+        spawnParticles(p.x, p.y, '#67e8f9', 10, 220, true);
+      }
+    };
+
+    /** Destroys hazard `j` with the usual score / loot. */
+    const killHazard = (j: number) => {
+      const e = engineRef.current;
+      const h = e.hazards[j];
+      spawnParticles(h.x, h.y, h.color, 12, 200);
+      const pts = (h.type === 'turret' ? 150 : 45) * e.combo;
+      e.score += pts;
+      if (h.type === 'turret') {
+        addShockwave(h.x, h.y, h.color, 70);
+        addFloatingText(h.x, h.y, `+${pts}`, '#c4b5fd', 14);
+        dropPower(h.x, h.y);
+        e.gems.push({
+          id: e.entityIdCounter++,
+          x: h.x,
+          y: h.y,
+          vx: 0,
+          vy: 120,
+          r: 10,
+          val: 2,
+          magnetized: false,
+          spin: 0,
+        });
+      }
+      e.hazards.splice(j, 1);
+    };
+
+    /** Deals weapon damage to hazard `j`. Only turrets have HP; everything else pops. Returns true on a kill. */
+    const damageHazard = (j: number, dmg: number): boolean => {
+      const e = engineRef.current;
+      const h = e.hazards[j];
+      if (h.type === 'turret' && (h.hp || 0) > dmg) {
+        h.hp = (h.hp || 1) - dmg;
+        h.hitFlash = 0.06;
+        spawnParticles(h.x, h.y, h.color, 4, 120);
+        if (e.hitSoundCd <= 0) {
+          sound.playSound('hit');
+          e.hitSoundCd = 0.08;
+        }
+        return false;
+      }
+      killHazard(j);
+      return true;
+    };
+
+    /** Area blast from Solar Fireballs, missiles and Holo Echo: hurts every enemy (not bullets) in range. */
+    const explode = (x: number, y: number, radius: number, dmg: number, color: string, skipId = -1) => {
+      const e = engineRef.current;
+      addShockwave(x, y, color, radius, 3);
+      spawnParticles(x, y, color, 8, 180);
+      spawnParticles(x, y, '#fde68a', 4, 120);
+      for (let j = e.hazards.length - 1; j >= 0; j--) {
+        const h = e.hazards[j];
+        if (h.id === skipId || h.type === 'shot' || h.type === 'orb') continue;
+        if (Math.hypot(h.x - x, h.y - y) < radius + h.r) damageHazard(j, dmg);
+      }
+    };
+
+    /** Closest thing worth shooting: enemies, the boss, or its live parts. */
+    const findTarget = (x: number, y: number, range: number): { x: number; y: number } | null => {
+      const e = engineRef.current;
+      let best: { x: number; y: number } | null = null;
+      let bestD = range;
+      for (const h of e.hazards) {
+        if (h.type === 'shot' || h.type === 'orb' || h.y < -10) continue;
+        const d = Math.hypot(h.x - x, h.y - y);
+        if (d < bestD) {
+          bestD = d;
+          best = h;
+        }
+      }
+      const boss = e.boss;
+      if (boss && bossReady(boss)) {
+        // Slight preference for the boss so homing rounds don't all chase stray drones
+        const d = Math.hypot(boss.x - x, boss.y - y) * 0.8;
+        if (d < bestD) {
+          bestD = d;
+          best = boss;
+        }
+        for (const pt of boss.parts) {
+          if (!pt.alive) continue;
+          const dp = Math.hypot(pt.x - x, pt.y - y) * 0.85;
+          if (dp < bestD) {
+            bestD = dp;
+            best = pt;
+          }
+        }
+      }
+      return best;
+    };
+
+    /** Homing rounds bend towards their target at a capped turn rate and accelerate. */
+    const steerBullet = (b: BulletEntity, dt: number) => {
+      const target = findTarget(b.x, b.y, 620);
+      let a = Math.atan2(b.vy, b.vx);
+      if (target) {
+        let diff = Math.atan2(target.y - b.y, target.x - b.x) - a;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        const turn = (b.turnRate || 6) * dt;
+        a += Math.max(-turn, Math.min(turn, diff));
+      }
+      const top = b.kind === 'missile' ? 640 : 780;
+      const spd = Math.min(top, Math.hypot(b.vx, b.vy) + 900 * dt);
+      b.vx = Math.cos(a) * spd;
+      b.vy = Math.sin(a) * spd;
+    };
+
+    /** One auto-blaster volley with the ship's signature weapon. */
+    const fireShipWeapons = (ship: ShipDef, lvl: number, fever: boolean, dmgMult: number) => {
+      const e = engineRef.current;
+      const p = e.player;
+      const color = fever ? '#fbbf24' : ship.color;
+      // Angled side shots hit softer, except during Overdrive
+      const side = fever ? 1 : 0.5;
+      p.volley++;
+      p.muzzleFlash = 1;
+      const fire = (dx: number, vx: number, dmg = 1, extra?: Partial<BulletEntity>, vy = -720) =>
+        e.bullets.push({
+          id: e.entityIdCounter++,
+          x: p.x + dx,
+          y: p.y - 18,
+          vx,
+          vy,
+          color,
+          fever,
+          damage: dmg * dmgMult,
+          kind: 'plasma',
+          ...extra,
+        });
+      const main = (dx: number) => {
+        if (ship.id === 'phoenix') fire(dx, 0, 1.2, { kind: 'fireball', splashRadius: 52 }, -560);
+        else if (ship.id === 'vortex') fire(dx, 0, 1.1, { kind: 'rail', pierce: 2 }, -1150);
+        else fire(dx, 0);
+      };
+      if (lvl === 1) {
+        main(0);
+      } else if (lvl <= 3) {
+        main(-7);
+        main(7);
+      } else {
+        main(-10);
+        main(0);
+        main(10);
+      }
+      if (lvl >= 3) {
+        fire(-8, -110, side);
+        fire(8, 110, side);
+      }
+      if (lvl >= 5) {
+        fire(-10, -220, side);
+        fire(10, 220, side);
+      }
+
+      // Signature extras
+      if (ship.id === 'striker' && p.volley % 4 === 0) {
+        // Rapid Plasma: every 4th volley adds a heavy piercing bolt
+        fire(0, 0, 1.4, { pierce: 1 }, -880);
+      } else if (ship.id === 'phantom' && p.volley % 2 === 0) {
+        // Homing Needles: darts fan out sideways, then hunt
+        const n = lvl >= 4 ? 2 : 1;
+        for (let k = 0; k < n; k++) {
+          const s = n === 2 ? (k ? 1 : -1) : p.volley % 4 === 0 ? 1 : -1;
+          e.bullets.push({
+            id: e.entityIdCounter++,
+            x: p.x + s * 12,
+            y: p.y - 6,
+            vx: s * 260,
+            vy: -380,
+            color: fever ? '#fde047' : '#c084fc',
+            fever,
+            damage: 0.65 * dmgMult,
+            kind: 'homing',
+            turnRate: 6.5,
+            life: 2.2,
+          });
+        }
+      } else if (ship.id === 'sovereign' && p.volley % 2 === 0) {
+        // Twin Wingman Drones add covering fire
+        for (const d of p.drones) {
+          e.bullets.push({
+            id: e.entityIdCounter++,
+            x: d.x,
+            y: d.y - 8,
+            vx: 0,
+            vy: -680,
+            color: fever ? '#fde047' : '#fde68a',
+            fever,
+            damage: 0.5 * dmgMult,
+            kind: 'drone',
+          });
+        }
+      }
+      if (ship.id === 'vortex' && p.volley % 3 === 1) sound.playSound('railgun');
+    };
+
     // ---------- Simulation (PLAYING only) ----------
     const update = (rawDt: number) => {
       const e = engineRef.current;
@@ -1382,8 +1843,22 @@ export const NeonGame: React.FC = () => {
       if (e.stagePhase === 'clear') {
         e.clearTimer -= rawDt;
         if (e.clearTimer <= 0) {
-          completeLevel();
+          if (e.bossRushWon) finishGameOver('victory');
+          else completeLevel();
           return;
+        }
+      }
+
+      // Tactical Perk picker opens after a short beat (lets a boss explosion land first)
+      if (e.perkPendingTimer > 0) {
+        if (!alive) {
+          e.perkPendingTimer = 0;
+        } else {
+          e.perkPendingTimer -= rawDt;
+          if (e.perkPendingTimer <= 0) {
+            e.perkPendingTimer = 0;
+            if (openPerkSelect()) return;
+          }
         }
       }
 
@@ -1402,16 +1877,31 @@ export const NeonGame: React.FC = () => {
         }
       }
 
+      const rush = gameModeRef.current === 'bossrush';
       if (alive) {
         e.elapsedRunTime += rawDt;
         const newWave = level
           ? level.wave + (e.stageTimer > level.stageTime * 0.5 ? 1 : 0)
+          : rush
+          ? 2 + Math.max(0, e.bossRushIndex)
           : 1 + Math.floor(e.elapsedRunTime / (gameModeRef.current === 'timed' ? 15 : 18));
         if (newWave > e.waveLevel) {
           e.waveLevel = newWave;
           e.score += e.waveLevel * 150;
-          if (!e.boss) showCenterBanner(`SPEED LEVEL ${e.waveLevel}!`, 'neon-glow-pink');
+          if (!e.boss && !rush) showCenterBanner(tr(`SPEED LEVEL ${e.waveLevel}!`, `TỐC ĐỘ CẤP ${e.waveLevel}!`), 'neon-glow-pink');
           sound.playSound('wave');
+          // Endless / Hardcore: Wave 2, 4 and 6 each grant a Tactical Perk
+          const mode = gameModeRef.current;
+          if (
+            (mode === 'endless' || mode === 'hardcore') &&
+            newWave % 2 === 0 &&
+            newWave <= 6 &&
+            newWave > e.perkWaveMilestone
+          ) {
+            e.perkWaveMilestone = newWave;
+            e.perkPendingTimer = Math.max(e.perkPendingTimer, 0.5);
+            e.perkReason = tr(`Wave ${newWave} reached`, `Đã tới đợt ${newWave}`);
+          }
         }
 
         if (gameModeRef.current === 'timed') {
@@ -1443,17 +1933,21 @@ export const NeonGame: React.FC = () => {
           e.isFeverActive = false;
           e.feverEnergy = 0;
           p.invulnTimer = 0.8;
+          novaBlast();
           refreshMusic();
         }
       }
 
       // Timers
+      const wasDashing = p.dashTimer > 0;
       if (p.dashTimer > 0) p.dashTimer -= rawDt;
+      if (wasDashing && p.dashTimer <= 0 && alive && hasPerk('chain_dash')) staticAftershock();
       if (p.dashCooldown > 0) p.dashCooldown = Math.max(0, p.dashCooldown - rawDt);
       if (p.invulnTimer > 0) p.invulnTimer -= rawDt;
       if (p.magnetTimer > 0) p.magnetTimer -= rawDt;
       if (p.slowFieldTimer > 0) p.slowFieldTimer -= rawDt;
       if (p.bossContactCd > 0) p.bossContactCd -= rawDt;
+      if (p.muzzleFlash > 0) p.muzzleFlash = Math.max(0, p.muzzleFlash - rawDt * 12);
       if (e.grazeSoundCd > 0) e.grazeSoundCd -= rawDt;
       if (e.hitSoundCd > 0) e.hitSoundCd -= rawDt;
 
@@ -1504,62 +1998,88 @@ export const NeonGame: React.FC = () => {
         p.trail.unshift({ x: p.x, y: p.y, dash: isDashingOrFever });
         if (p.trail.length > 16) p.trail.pop();
 
+        // Sovereign's wingman drones glide after their slots beside the wings
+        if (ship.id === 'sovereign') {
+          const follow = Math.min(1, 14 * rawDt);
+          p.drones.forEach((d, k) => {
+            const s = k ? 1 : -1;
+            d.x += (p.x + s * 34 - d.x) * follow;
+            d.y += (p.y + 10 + Math.sin(e.t * 4 + k * Math.PI) * 6 - d.y) * follow;
+          });
+        }
+
         // Auto-blaster: always on at a slow idle cadence; full rate from combo x5 (lowered by
         // Targeting AI), during Overdrive, or in a boss fight
         const up = saveDataRef.current.upgrades;
+        const berserk = hasPerk('berserk_barrel') && p.shieldCount === 0;
         p.autoFireTimer -= rawDt;
         if (p.autoFireTimer <= 0) {
           const fullRate = e.combo >= Math.max(1, 5 - (up.targeting || 0));
           const interval = e.isFeverActive ? 0.11 : e.boss ? (e.combo >= 10 ? 0.12 : 0.15) : fullRate ? 0.24 : 0.42;
-          p.autoFireTimer = interval / (1 + (up.fireRate || 0) * 0.08);
-          const color = e.isFeverActive ? '#fbbf24' : ship.color;
+          p.autoFireTimer =
+            (interval * (WEAPON_RATE[ship.id] || 1)) / ((1 + (up.fireRate || 0) * 0.08) * (berserk ? 1.35 : 1));
           const fever = e.isFeverActive;
-          const dmgMult = 1 + (up.blaster || 0) * 0.12;
+          const dmgMult = (1 + (up.blaster || 0) * 0.12) * (berserk ? 1.25 : 1);
           // A x12 combo still guarantees the twin blaster; Overdrive fires at least the Lv3 spread
           let lvl = Math.max(p.weaponLevel, e.combo >= 12 ? 2 : 1);
           if (fever) lvl = Math.min(MAX_WEAPON_LEVEL, Math.max(3, lvl + 1));
-          // Angled side shots hit softer, except during Overdrive
-          const side = fever ? 1 : 0.5;
-          const fire = (dx: number, vx: number, dmg = 1) =>
-            e.bullets.push({
-              id: e.entityIdCounter++,
-              x: p.x + dx,
-              y: p.y - 18,
-              vx,
-              vy: -720,
-              color,
-              fever,
-              damage: dmg * dmgMult,
-            });
-          if (lvl === 1) {
-            fire(0, 0);
-          } else if (lvl <= 3) {
-            fire(-7, 0);
-            fire(7, 0);
-          } else {
-            fire(-10, 0);
-            fire(0, 0);
-            fire(10, 0);
+          fireShipWeapons(ship, lvl, fever, dmgMult);
+        }
+
+        // Swarm Protocol: a hot combo keeps a missile pair in the air
+        if (hasPerk('combo_missiles') && e.combo >= 10) {
+          e.missileTimer -= rawDt;
+          if (e.missileTimer <= 0) {
+            e.missileTimer = 1.8;
+            const dmg = 2 * (1 + (up.blaster || 0) * 0.12);
+            for (const s of [-1, 1]) {
+              e.bullets.push({
+                id: e.entityIdCounter++,
+                x: p.x + s * 14,
+                y: p.y,
+                vx: s * 280,
+                vy: -160,
+                color: '#fb923c',
+                fever: e.isFeverActive,
+                damage: dmg,
+                kind: 'missile',
+                turnRate: 5,
+                life: 3,
+                splashRadius: 40,
+              });
+            }
+            sound.playSound('homing_launch');
           }
-          if (lvl >= 3) {
-            fire(-8, -110, side);
-            fire(8, 110, side);
-          }
-          if (lvl >= 5) {
-            fire(-10, -220, side);
-            fire(10, 220, side);
-          }
+        } else if (e.missileTimer > 0.6) {
+          e.missileTimer = 0.6;
         }
       } else {
         p.trail.pop();
       }
 
       // Player bullets
+      const ricochet = hasPerk('ricochet');
       for (let i = e.bullets.length - 1; i >= 0; i--) {
         const b = e.bullets[i];
+        if (b.kind === 'homing' || b.kind === 'missile') {
+          b.life = (b.life ?? 2) - rawDt;
+          if (b.life <= 0) {
+            spawnParticles(b.x, b.y, b.color, 3, 80);
+            e.bullets.splice(i, 1);
+            continue;
+          }
+          steerBullet(b, rawDt);
+        }
         b.x += b.vx * rawDt;
         b.y += b.vy * rawDt;
-        if (b.y < -20 || b.x < -20 || b.x > e.W + 20) {
+        // Prism Bounce: one ricochet off the side walls
+        if (ricochet && !b.bounced && ((b.x < 6 && b.vx < 0) || (b.x > e.W - 6 && b.vx > 0))) {
+          b.vx = -b.vx;
+          b.bounced = true;
+          b.x = Math.max(6, Math.min(e.W - 6, b.x));
+          spawnParticles(b.x, b.y, '#a78bfa', 3, 90, true);
+        }
+        if (b.y < -30 || b.y > e.H + 30 || b.x < -20 || b.x > e.W + 20) {
           e.bullets.splice(i, 1);
           continue;
         }
@@ -1571,6 +2091,7 @@ export const NeonGame: React.FC = () => {
             if (res === 'hit') {
               spawnParticles(b.x, b.y, boss.color, 3, 120);
               e.score += 10 * e.combo;
+              if (b.splashRadius) explode(b.x, b.y, b.splashRadius, (b.damage ?? 1) * 0.6, b.color);
             } else {
               spawnParticles(b.x, b.y, '#e2e8f0', 2, 140, true);
             }
@@ -1581,55 +2102,39 @@ export const NeonGame: React.FC = () => {
             continue;
           }
         }
+        let consumed = false;
+        const reach = b.kind === 'fireball' ? 11 : b.kind === 'missile' ? 10 : 8;
         for (let j = e.hazards.length - 1; j >= 0; j--) {
           const h = e.hazards[j];
           if (h.type === 'shot' || h.type === 'orb') continue;
-          if (Math.hypot(b.x - h.x, b.y - h.y) < h.r + 8) {
-            e.bullets.splice(i, 1);
+          if (b.hitIds && b.hitIds.includes(h.id)) continue;
+          if (Math.hypot(b.x - h.x, b.y - h.y) < h.r + reach) {
             const dmg = b.damage ?? 1;
-            if (h.type === 'turret' && (h.hp || 0) > dmg) {
-              h.hp = (h.hp || 1) - dmg;
-              h.hitFlash = 0.06;
-              spawnParticles(b.x, b.y, h.color, 4, 120);
-              if (e.hitSoundCd <= 0) {
-                sound.playSound('hit');
-                e.hitSoundCd = 0.08;
-              }
+            const { x: hx, y: hy, id: hid } = h;
+            damageHazard(j, dmg);
+            if (b.splashRadius) explode(hx, hy, b.splashRadius, dmg * 0.6, b.color, hid);
+            if ((b.pierce || 0) > 0) {
+              b.pierce = (b.pierce || 1) - 1;
+              (b.hitIds ??= []).push(hid);
+              spawnParticles(hx, hy, '#ffffff', 3, 160, true);
             } else {
-              spawnParticles(h.x, h.y, h.color, 12, 200);
-              const pts = (h.type === 'turret' ? 150 : 45) * e.combo;
-              e.score += pts;
-              if (h.type === 'turret') {
-                addShockwave(h.x, h.y, h.color, 70);
-                addFloatingText(h.x, h.y, `+${pts}`, '#c4b5fd', 14);
-                dropPower(h.x, h.y);
-                e.gems.push({
-                  id: e.entityIdCounter++,
-                  x: h.x,
-                  y: h.y,
-                  vx: 0,
-                  vy: 120,
-                  r: 10,
-                  val: 2,
-                  magnetized: false,
-                  spin: 0,
-                });
-              }
-              e.hazards.splice(j, 1);
+              consumed = true;
             }
             break;
           }
         }
+        if (consumed) e.bullets.splice(i, 1);
       }
 
       // Spawners
       if (alive && e.stagePhase !== 'clear') {
         const bossActive = !!e.boss;
-        // Campaign Wardens get the stage to themselves (mostly)
-        const bossSpawnMult = level ? 3.5 : 2.4;
+        // Campaign Wardens and Boss Rush bosses get the stage to themselves (mostly)
+        const bossSpawnMult = level || rush ? 3.5 : 2.4;
         // Wide screens spawn proportionally more often so density matches a phone
         const scale = fieldScale(e.W);
-        e.hazardTimer -= worldDt;
+        // Boss Rush intermissions are a breather: no fresh enemies between bosses
+        if (!rush || bossActive) e.hazardTimer -= worldDt;
         if (e.hazardTimer <= 0) {
           spawnHazardWave();
           // Past the speed cap, Endless keeps escalating with extra enemies rather than faster ones
@@ -1651,7 +2156,7 @@ export const NeonGame: React.FC = () => {
           e.powerupTimer = 8.5 + Math.random() * 3.5;
         }
 
-        const laserMode = level ? level.lasers : e.waveLevel >= 2 ? 'v' : 'none';
+        const laserMode = level ? level.lasers : rush ? 'none' : e.waveLevel >= 2 ? 'v' : 'none';
         if (laserMode !== 'none' && !bossActive) {
           e.laserTimer -= worldDt;
           if (e.laserTimer <= 0) {
@@ -1672,6 +2177,15 @@ export const NeonGame: React.FC = () => {
             }
           } else if (e.boss) {
             e.bossTime += rawDt;
+          }
+        } else if (rush) {
+          // Boss Rush: next boss after the intermission (the perk picker pauses this countdown)
+          if (!bossActive && !e.bossRushWon && e.bossRushIndex < BOSS_RUSH_ORDER.length && e.perkPendingTimer <= 0) {
+            e.bossRushTimer -= rawDt;
+            if (e.bossRushTimer <= 0) {
+              e.hazards = e.hazards.filter((h) => h.type !== 'shot');
+              spawnBoss(BOSS_RUSH_ORDER[e.bossRushIndex]);
+            }
           }
         } else if (!bossActive && e.elapsedRunTime >= e.nextBossTime) {
           spawnBoss();
@@ -1707,7 +2221,9 @@ export const NeonGame: React.FC = () => {
           e.runShardsEarned += Math.max(1, Math.round(g.val * shardMult));
 
           bumpCombo(1, 3.2);
-          const pts = 25 * e.combo * g.val;
+          const frenzy = hasPerk('shard_frenzy');
+          if (frenzy) p.dashCooldown = Math.max(0, p.dashCooldown - 0.15);
+          const pts = Math.round(25 * e.combo * g.val * (frenzy ? 1.25 : 1));
           e.score += pts;
           addFeverEnergy(6.5);
 
@@ -1747,7 +2263,12 @@ export const NeonGame: React.FC = () => {
           spawnParticles(pu.x, pu.y, pu.color, 16, 200);
           addShockwave(pu.x, pu.y, pu.color, 70, 2);
           const maxed = pu.kind === 'power' && p.weaponLevel >= MAX_WEAPON_LEVEL;
-          const label = pu.kind !== 'power' ? pu.label : maxed ? 'MAX POWER!' : `POWER UP · LV ${p.weaponLevel + 1}`;
+          const label =
+            pu.kind !== 'power'
+              ? pu.label
+              : maxed
+              ? tr('MAX POWER!', 'HỎA LỰC TỐI ĐA!')
+              : `${tr('POWER UP', 'HỎA LỰC TĂNG')} · LV ${p.weaponLevel + 1}`;
           addFloatingText(pu.x, pu.y - 12, label, pu.color, 14);
 
           if (pu.kind === 'key') {
@@ -1794,13 +2315,16 @@ export const NeonGame: React.FC = () => {
         } else if (!l.grazed && dx < l.width / 2 + p.radius + grazeBonus * 0.6) {
           l.grazed = true;
           e.nearMissesThisRun++;
+          if (l.orient === 'h') pushArc(p.x, p.y, p.x, l.x + Math.sign(p.y - l.x) * (l.width / 2), '#fb7185');
+          else pushArc(p.x, p.y, l.x + Math.sign(p.x - l.x) * (l.width / 2), p.y, '#fb7185');
+          chargeGrazeShield();
           bumpCombo(2, 3.5);
           const pts = 100 * e.combo;
           e.score += pts;
           addFeverEnergy(16);
           notifyGraze(2);
           sound.playSound('nearmiss');
-          addFloatingText(p.x, p.y - 24, `LASER GRAZE! +${pts}`, '#fb7185', 15);
+          addFloatingText(p.x, p.y - 24, `${tr('LASER GRAZE!', 'SƯỢT LASER!')} +${pts}`, '#fb7185', 15);
           advanceQuest('nearmiss', 1, false);
           advanceQuest('combo', e.combo, true);
         }
@@ -1826,12 +2350,51 @@ export const NeonGame: React.FC = () => {
         } else {
           if (alive && boss.kind === 'sentinel') {
             boss.timeLeft -= rawDt;
-            if (boss.timeLeft <= 0) showCenterBanner('THE SENTINEL RETREATED', 'neon-glow-pink');
+            if (boss.timeLeft <= 0) showCenterBanner(tr('THE SENTINEL RETREATED', 'LÍNH CANH ĐÃ RÚT LUI'), 'neon-glow-pink');
           }
           behavior.update(boss, api, worldDt, true);
         }
 
         if (alive && e.boss === boss && bossReady(boss)) behavior.contact(boss, api, isDashingOrFever);
+      }
+
+      // Holo Echo decoys: bend nearby enemy shots into themselves, then detonate
+      for (let k = e.decoys.length - 1; k >= 0; k--) {
+        const d = e.decoys[k];
+        d.life -= rawDt;
+        for (let j = e.hazards.length - 1; j >= 0; j--) {
+          const h = e.hazards[j];
+          if (h.type !== 'shot') continue;
+          const dist = Math.hypot(d.x - h.x, d.y - h.y);
+          if (dist < 18) {
+            spawnParticles(h.x, h.y, '#f0abfc', 3, 90);
+            e.score += 5 * e.combo;
+            e.hazards.splice(j, 1);
+          } else if (dist < 240) {
+            let a = Math.atan2(h.vy, h.vx);
+            let diff = Math.atan2(d.y - h.y, d.x - h.x) - a;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            a += Math.max(-3.2 * worldDt, Math.min(3.2 * worldDt, diff));
+            const sp = Math.hypot(h.vx, h.vy);
+            h.vx = Math.cos(a) * sp;
+            h.vy = Math.sin(a) * sp;
+            h.angle = a;
+            h.ay = undefined;
+          }
+        }
+        if (d.life <= 0) {
+          e.decoys.splice(k, 1);
+          sound.playSound('boom');
+          e.screenShake = Math.max(e.screenShake, 8);
+          e.hazards = e.hazards.filter((h) => {
+            if (h.type !== 'shot' || Math.hypot(h.x - d.x, h.y - d.y) > 130) return true;
+            spawnParticles(h.x, h.y, '#f0abfc', 2, 80);
+            return false;
+          });
+          explode(d.x, d.y, 130, 4, '#e879f9');
+          addFloatingText(d.x, d.y - 20, tr('ECHO BURST!', 'BÓNG ẢNH NỔ!'), '#f0abfc', 14);
+        }
       }
 
       // Hazards
@@ -1841,7 +2404,8 @@ export const NeonGame: React.FC = () => {
 
         if (h.type === 'seeker') {
           h.life = (h.life || 5.5) - worldDt;
-          const desired = Math.atan2(p.y - h.y, p.x - h.x);
+          const lure = nearestDecoy(h.x, h.y, Infinity) ?? p;
+          const desired = Math.atan2(lure.y - h.y, lure.x - h.x);
           let diff = desired - h.angle;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
@@ -1946,7 +2510,7 @@ export const NeonGame: React.FC = () => {
           const pts = 300 * e.combo;
           e.score += pts;
           addFeverEnergy(20);
-          addFloatingText(p.x, p.y - 26, `PARRY! +${pts}`, '#67e8f9', 17);
+          addFloatingText(p.x, p.y - 26, `${tr('PARRY!', 'PHẢN ĐÒN!')} +${pts}`, '#67e8f9', 17);
           advanceQuest('dashkill', 1, false);
           noteDashSmash();
           continue;
@@ -1973,7 +2537,7 @@ export const NeonGame: React.FC = () => {
                 bumpCombo(2, 3.2);
                 const smashPts = 160 * e.combo;
                 e.score += smashPts;
-                addFloatingText(h.x, h.y, `SMASH! +${smashPts}`, '#67e8f9', 15);
+                addFloatingText(h.x, h.y, `${tr('SMASH!', 'HÚC NÁT!')} +${smashPts}`, '#67e8f9', 15);
                 if (h.type === 'turret') dropPower(h.x, h.y);
                 advanceQuest('dashkill', 1, false);
                 advanceQuest('combo', e.combo, true);
@@ -1991,6 +2555,8 @@ export const NeonGame: React.FC = () => {
             h.grazed = true; // no near-miss credit for something that went straight through you
           } else if (!h.grazed && dist < hitRadius + (isShot ? grazeBonus * 0.7 : grazeBonus)) {
             h.grazed = true;
+            pushArc(p.x, p.y, h.x, h.y, isShot ? '#f9a8d4' : '#e879f9');
+            chargeGrazeShield();
             if (isShot) {
               bumpCombo(1, 3.2);
               const pts = 40 * e.combo;
@@ -2000,7 +2566,7 @@ export const NeonGame: React.FC = () => {
               if (e.grazeSoundCd <= 0) {
                 sound.playSound('nearmiss');
                 e.grazeSoundCd = 0.12;
-                addFloatingText(p.x, p.y - 22, `GRAZE +${pts}`, '#f9a8d4', 12);
+                addFloatingText(p.x, p.y - 22, `${tr('GRAZE', 'SƯỢT')} +${pts}`, '#f9a8d4', 12);
               }
               spawnParticles(p.x, p.y, '#f9a8d4', 3, 90);
             } else {
@@ -2015,7 +2581,7 @@ export const NeonGame: React.FC = () => {
               sound.playSound('nearmiss');
               sound.triggerHaptic(15);
               addShockwave(p.x, p.y, '#e879f9', 65, 2);
-              addFloatingText(p.x, p.y - 22, `NEAR MISS! +${grazePts}`, '#f0abfc', 15);
+              addFloatingText(p.x, p.y - 22, `${tr('NEAR MISS!', 'NÉ SÁT!')} +${grazePts}`, '#f0abfc', 15);
               advanceQuest('nearmiss', 1, false);
             }
             advanceQuest('combo', e.combo, true);
@@ -2092,6 +2658,11 @@ export const NeonGame: React.FC = () => {
         if (ft.alpha <= 0) e.floatingTexts.splice(i, 1);
       }
 
+      for (let i = e.grazeArcs.length - 1; i >= 0; i--) {
+        e.grazeArcs[i].alpha -= dt * 5;
+        if (e.grazeArcs[i].alpha <= 0) e.grazeArcs.splice(i, 1);
+      }
+
       if (e.screenShake > 0) e.screenShake = Math.max(0, e.screenShake - 38 * dt);
       if (e.flashAlpha > 0) e.flashAlpha = Math.max(0, e.flashAlpha - 2.4 * dt);
     };
@@ -2148,6 +2719,8 @@ export const NeonGame: React.FC = () => {
     refreshMusic,
     noteDashSmash,
     syncHud,
+    novaBlast,
+    openPerkSelect,
   ]);
 
   // ========================================================
@@ -2259,11 +2832,11 @@ export const NeonGame: React.FC = () => {
         onMouseLeave={onPointerUp}
       />
 
-      {gameState === 'PLAYING' && (
+      {(gameState === 'PLAYING' || gameState === 'PERK_SELECT') && (
         <LiveHUD
           store={hudStore}
           gameMode={gameMode}
-          level={gameMode === 'campaign' ? LEVELS[levelIndex] : null}
+          level={gameMode === 'campaign' ? localLevel(LEVELS[levelIndex]) : null}
           comm={hudComm}
           currentQuest={currentQuest}
           centerBannerText={centerBannerText}
@@ -2298,13 +2871,21 @@ export const NeonGame: React.FC = () => {
       {gameState === 'STORY' && (
         <StoryScreen
           key={`${levelIndex}-${storyKind}`}
-          level={LEVELS[levelIndex]}
+          level={localLevel(LEVELS[levelIndex])}
           kind={storyKind}
           isFinal={levelIndex === LEVELS.length - 1}
           onDone={onStoryDone}
           onBack={returnToMainMenu}
         />
       )}
+
+      <PerkModal
+        isOpen={gameState === 'PERK_SELECT'}
+        options={perkOffer}
+        owned={engineRef.current.activePerks}
+        subtitle={perkSubtitle}
+        onPick={pickPerk}
+      />
 
       <PauseModal
         isOpen={gameState === 'PAUSED'}
@@ -2327,7 +2908,7 @@ export const NeonGame: React.FC = () => {
         isOpen={gameState === 'GAMEOVER'}
         stats={gameOverStats}
         gameMode={gameMode}
-        level={gameMode === 'campaign' ? LEVELS[levelIndex] : null}
+        level={gameMode === 'campaign' ? localLevel(LEVELS[levelIndex]) : null}
         onPlayAgain={() => startGame(false)}
         onRetryBoss={() => startGame(true)}
         onOpenShop={() => {

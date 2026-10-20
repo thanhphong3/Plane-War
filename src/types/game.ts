@@ -1,5 +1,24 @@
-export type GameMode = 'endless' | 'timed' | 'hardcore' | 'campaign';
-export type GameState = 'MENU' | 'PLAYING' | 'PAUSED' | 'GAMEOVER' | 'STORY' | 'LEVELCLEAR';
+export type GameMode = 'endless' | 'timed' | 'hardcore' | 'campaign' | 'bossrush';
+export type GameState = 'MENU' | 'PLAYING' | 'PAUSED' | 'GAMEOVER' | 'STORY' | 'LEVELCLEAR' | 'PERK_SELECT';
+
+/** Mid-run Tactical Perks (Endless / Hardcore / Boss Rush). */
+export type PerkId =
+  | 'chain_dash'
+  | 'graze_shield'
+  | 'ricochet'
+  | 'dash_decoy'
+  | 'overdrive_nova'
+  | 'combo_missiles'
+  | 'shard_frenzy'
+  | 'berserk_barrel';
+
+export interface PerkDef {
+  id: PerkId;
+  name: string;
+  desc: string;
+  icon: string;
+  color: string;
+}
 
 export type BossKind = 'sentinel' | 'gatekeeper' | 'twins' | 'furnace' | 'wraith' | 'singularity' | 'null';
 
@@ -11,6 +30,8 @@ export interface ShipDef {
   secondary: string;
   cost: number;
   perk: string;
+  /** Signature auto-blaster, shown in the hangar. */
+  weapon: string;
   stats: {
     speed: number;
     dashCd: number;
@@ -54,6 +75,10 @@ export interface SaveData {
   bestEndless: number;
   bestTimed: number;
   bestHardcore: number;
+  /** Best Boss Rush score. */
+  bestBossRush: number;
+  /** Fastest full Boss Rush clear in seconds (0 = never cleared). */
+  bestBossRushTime: number;
   bestCombo: number;
   bestFeverInRun: number;
   totalRuns: number;
@@ -211,6 +236,20 @@ export interface BulletEntity {
   damage?: number;
   /** Already slipped through a boss shield gap. */
   passed?: boolean;
+  /** Visual / behaviour family. Undefined renders as plain plasma. */
+  kind?: 'plasma' | 'homing' | 'fireball' | 'rail' | 'drone' | 'missile';
+  /** Enemies this bullet can still pass through after a hit. */
+  pierce?: number;
+  /** Explodes on impact, hurting enemies within this radius. */
+  splashRadius?: number;
+  /** Ids of enemies already pierced, so one target is never hit twice. */
+  hitIds?: number[];
+  /** Homing: max turn speed in rad/s. */
+  turnRate?: number;
+  /** Seconds left before a homing round fizzles. */
+  life?: number;
+  /** Prism Bounce perk: already ricocheted off a screen edge. */
+  bounced?: boolean;
 }
 
 export interface ParticleEntity {

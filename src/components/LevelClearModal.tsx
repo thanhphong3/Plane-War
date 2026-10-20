@@ -1,6 +1,8 @@
 import React from 'react';
 import { Check, ChevronRight, Map as MapIcon, RotateCcw, X } from 'lucide-react';
 import { LEVELS } from '../game/campaign';
+import { tr } from '../i18n';
+import { localLevel } from '../i18n/content';
 import { sound } from '../utils/audio';
 import { Stars } from './CampaignMap';
 import { ShardIcon } from './Icon';
@@ -44,7 +46,7 @@ const Criterion: React.FC<{ ok: boolean; label: string; detail: string }> = ({ o
 
 export const LevelClearModal: React.FC<LevelClearModalProps> = ({ isOpen, stats, onNext, onReplay, onMap }) => {
   if (!isOpen || !stats) return null;
-  const level = LEVELS[stats.levelId];
+  const level = localLevel(LEVELS[stats.levelId]);
   const isFinal = stats.levelId === LEVELS.length - 1;
   const newBest = stats.stars > stats.prevStars && stats.prevStars > 0;
 
@@ -55,40 +57,51 @@ export const LevelClearModal: React.FC<LevelClearModalProps> = ({ isOpen, stats,
           {level.code} • {level.name}
         </p>
         <h2 className="text-2xl sm:text-3xl font-black text-white font-cyber uppercase neon-glow-amber mt-1">
-          {isFinal ? 'Campaign Complete' : 'Sector Cleared'}
+          {isFinal ? tr('Campaign Complete', 'Hoàn thành chiến dịch') : tr('Sector Cleared', 'Đã giải phóng khu vực')}
         </h2>
 
         <div className="flex justify-center my-3 claim-bounce">
           <Stars count={stats.stars} size={34} />
         </div>
-        {newBest && <p className="text-[11px] font-black text-amber-300 font-cyber -mt-1 mb-1">NEW BEST RATING!</p>}
+        {newBest && <p className="text-[11px] font-black text-amber-300 font-cyber -mt-1 mb-1">{tr('NEW BEST RATING!', 'ĐÁNH GIÁ CAO NHẤT MỚI!')}</p>}
 
         <ul className="text-left space-y-1.5 bg-slate-900/80 border border-slate-800 rounded-2xl p-3">
-          <Criterion ok label={`Defeat ${level.bossName}`} detail="Done" />
+          <Criterion ok label={tr(`Defeat ${level.bossName}`, `Đánh bại ${level.bossName}`)} detail={tr('Done', 'Xong')} />
           <Criterion
             ok={stats.hitsTaken === 0 && !stats.skippedStage}
-            label={stats.skippedStage ? 'Take no hits (full run only)' : 'Take no hits'}
-            detail={stats.skippedStage ? 'Boss retry' : `${stats.hitsTaken} hit${stats.hitsTaken === 1 ? '' : 's'}`}
+            label={
+              stats.skippedStage
+                ? tr('Take no hits (full run only)', 'Không trúng đòn (chỉ khi chơi trọn lượt)')
+                : tr('Take no hits', 'Không trúng đòn')
+            }
+            detail={
+              stats.skippedStage
+                ? tr('Boss retry', 'Đánh lại boss')
+                : tr(`${stats.hitsTaken} hit${stats.hitsTaken === 1 ? '' : 's'}`, `${stats.hitsTaken} lần trúng`)
+            }
           />
           <Criterion
             ok={stats.bossTime <= stats.parTime}
-            label={`Boss under ${stats.parTime}s`}
+            label={tr(`Boss under ${stats.parTime}s`, `Hạ boss dưới ${stats.parTime}s`)}
             detail={`${stats.bossTime.toFixed(1)}s`}
           />
         </ul>
 
         <div className="grid grid-cols-2 gap-2 mt-3">
           <div className="rounded-2xl bg-slate-900/80 border border-slate-800 py-2">
-            <span className="block text-[10px] text-slate-500 uppercase tracking-wide">Score</span>
+            <span className="block text-[10px] text-slate-500 uppercase tracking-wide">{tr('Score', 'Điểm')}</span>
             <span className="text-base font-black text-cyan-200 tabular-nums">{stats.score.toLocaleString('en-US')}</span>
           </div>
           <div className="rounded-2xl bg-slate-900/80 border border-slate-800 py-2">
-            <span className="block text-[10px] text-slate-500 uppercase tracking-wide">Shards</span>
+            <span className="block text-[10px] text-slate-500 uppercase tracking-wide">{tr('Shards', 'Mảnh')}</span>
             <span className="inline-flex items-center gap-1 text-base font-black text-amber-300 tabular-nums">
               <ShardIcon size={13} />+{stats.shardsEarned + stats.reward}
             </span>
             <span className="block text-[9px] text-amber-200/70">
-              incl. {stats.firstClear ? 'first clear' : 'replay'} bonus +{stats.reward}
+              {stats.firstClear
+                ? tr('incl. first clear bonus', 'gồm thưởng lần đầu')
+                : tr('incl. replay bonus', 'gồm thưởng chơi lại')}{' '}
+              +{stats.reward}
             </span>
           </div>
         </div>
@@ -103,7 +116,7 @@ export const LevelClearModal: React.FC<LevelClearModalProps> = ({ isOpen, stats,
               }}
               className="w-full py-3.5 rounded-2xl btn-primary text-slate-950 font-black text-base uppercase font-cyber tracking-wider btn-cyber animate-glow flex items-center justify-center gap-2"
             >
-              Next Sector <ChevronRight size={18} />
+              {tr('Next Sector', 'Khu vực tiếp')} <ChevronRight size={18} />
             </button>
           )}
           <div className="grid grid-cols-2 gap-2">
@@ -115,7 +128,7 @@ export const LevelClearModal: React.FC<LevelClearModalProps> = ({ isOpen, stats,
               }}
               className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-100 font-bold text-xs flex items-center justify-center gap-1.5 btn-cyber font-cyber"
             >
-              <RotateCcw size={14} /> Replay
+              <RotateCcw size={14} /> {tr('Replay', 'Chơi lại')}
             </button>
             <button
               type="button"
@@ -129,7 +142,7 @@ export const LevelClearModal: React.FC<LevelClearModalProps> = ({ isOpen, stats,
                   : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300'
               }`}
             >
-              <MapIcon size={14} /> Sector Map
+              <MapIcon size={14} /> {tr('Sector Map', 'Bản đồ')}
             </button>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { BossEntity, BossKind, BossPart, BulletEntity, HazardEntity, PowerupEntity } from '../types/game';
+import { tr } from '../i18n';
 import { SoundType } from '../utils/audio';
 import { SpeakerId } from './campaign';
 
@@ -142,7 +143,7 @@ function strikeFx(api: BossApi, label: string, color = '#67e8f9') {
 }
 
 /** Dash into something solid that can't be hurt right now. */
-function bounce(api: BossApi, fromX: number, fromY: number, label = 'CLANK!') {
+function bounce(api: BossApi, fromX: number, fromY: number, label = tr('CLANK!', 'KENG!')) {
   const p = api.player;
   if (p.bossContactCd > 0) return;
   p.bossContactCd = 0.35;
@@ -155,7 +156,7 @@ function bounce(api: BossApi, fromX: number, fromY: number, label = 'CLANK!') {
 }
 
 /** Generic body contact: dash strikes deal `dmg`, anything else hurts the player. */
-function bodyContact(b: BossEntity, api: BossApi, dashing: boolean, x: number, y: number, r: number, dmg: number, label = 'CORE STRIKE!') {
+function bodyContact(b: BossEntity, api: BossApi, dashing: boolean, x: number, y: number, r: number, dmg: number, label = tr('CORE STRIKE!', 'ĐÒN VÀO LÕI!')) {
   const p = api.player;
   if (dist(p.x, p.y, x, y) >= r * 0.8 + p.radius) return false;
   if (dashing) {
@@ -304,7 +305,9 @@ const gatekeeper: BossBehavior = {
       }
     }
     const facing = Math.abs(angDiff(b.v.shield, Math.PI / 2)) < 1.05;
-    b.status = facing ? 'GAP OPEN ▼ FIRE NOW!' : 'Shield sealed — wait for the gap';
+    b.status = facing
+      ? tr('GAP OPEN ▼ FIRE NOW!', 'KHE HỞ ▼ BẮN NGAY!')
+      : tr('Shield sealed — wait for the gap', 'Khiên đã khép — chờ khe hở');
     if (!ready) return;
 
     b.t += dt;
@@ -362,7 +365,7 @@ const gatekeeper: BossBehavior = {
     const a = Math.atan2(p.y - b.y, p.x - b.x);
     if (Math.abs(angDiff(a, b.v.shield)) < b.v.gap / 2 + 0.15) {
       p.bossContactCd = 0.35;
-      strikeFx(api, 'GATE BREACH!');
+      strikeFx(api, tr('GATE BREACH!', 'PHÁ CỔNG!'));
       damage(b, api, 10);
       api.pullPlayer(0, 80);
     } else {
@@ -401,8 +404,16 @@ function twinDamage(b: BossEntity, api: BossApi, i: number, amount: number) {
       api.defeat();
       return;
     }
-    api.banner(`${TWIN_NAMES[i]} DOWN — FINISH ${TWIN_NAMES[1 - i]}!`, 'neon-glow-amber');
-    api.comm(i ? 'castor' : 'pollux', i ? 'Pollux! Hold on, I’m rebuilding you!' : 'Castor! I’ll bring you back!');
+    api.banner(
+      tr(`${TWIN_NAMES[i]} DOWN — FINISH ${TWIN_NAMES[1 - i]}!`, `${TWIN_NAMES[i]} GỤC — HẠ NỐT ${TWIN_NAMES[1 - i]}!`),
+      'neon-glow-amber'
+    );
+    api.comm(
+      i ? 'castor' : 'pollux',
+      i
+        ? tr('Pollux! Hold on, I’m rebuilding you!', 'Pollux! Cố lên, ta đang dựng lại ngươi!')
+        : tr('Castor! I’ll bring you back!', 'Castor! Ta sẽ đưa ngươi trở lại!')
+    );
   }
   b.hp = b.parts.reduce((s, pt) => s + (pt.alive ? pt.hp : 0), 0);
 }
@@ -435,7 +446,7 @@ const twins: BossBehavior = {
         pt.hp = pt.maxHp * 0.5;
         api.sfx('powerup');
         api.shockwave(pt.x, pt.y, '#ffffff', 140, 3);
-        api.banner(`${TWIN_NAMES[i]} REVIVED!`, 'neon-glow-pink');
+        api.banner(tr(`${TWIN_NAMES[i]} REVIVED!`, `${TWIN_NAMES[i]} HỒI SINH!`), 'neon-glow-pink');
       }
     });
     b.hp = b.parts.reduce((s, pt) => s + (pt.alive ? pt.hp : 0), 0);
@@ -454,8 +465,8 @@ const twins: BossBehavior = {
       b.v.mode++;
       b.v.modeT = 0;
       const next = TWIN_MODES[b.v.mode % TWIN_MODES.length];
-      if (next === 'cross') api.banner('TETHER DESCENDING!', 'neon-glow-pink');
-      if (next === 'scissor') api.banner('TETHER SWEEP!', 'neon-glow-pink');
+      if (next === 'cross') api.banner(tr('TETHER DESCENDING!', 'DÂY NỐI HẠ XUỐNG!'), 'neon-glow-pink');
+      if (next === 'scissor') api.banner(tr('TETHER SWEEP!', 'DÂY NỐI QUÉT NGANG!'), 'neon-glow-pink');
     }
     const mode = TWIN_MODES[b.v.mode % TWIN_MODES.length];
     const { W, H } = api;
@@ -505,19 +516,24 @@ const twins: BossBehavior = {
         api.shockwave(p.x, p.y, '#ffffff', 200, 5);
         api.particles(p.x, p.y, '#22d3ee', 20, 300, true);
         api.particles(p.x, p.y, '#f472b6', 20, 300, true);
-        api.text(p.x, p.y - 26, 'TETHER SNAPPED!', '#fde047', 18);
-        api.banner('TWINS STUNNED — x2 DAMAGE!', 'neon-glow-amber');
+        api.text(p.x, p.y - 26, tr('TETHER SNAPPED!', 'ĐỨT DÂY NỐI!'), '#fde047', 18);
+        api.banner(tr('TWINS STUNNED — x2 DAMAGE!', 'SONG SINH BỊ CHOÁNG — x2 SÁT THƯƠNG!'), 'neon-glow-amber');
       } else if (touch === 'hit') {
         api.hurtPlayer();
       }
     }
 
     const dead = b.parts.findIndex((pt) => !pt.alive);
-    if (dead >= 0) b.status = `${TWIN_NAMES[dead]} DOWN — kill ${TWIN_NAMES[1 - dead]} in ${Math.max(0, b.parts[dead].timer).toFixed(1)}s!`;
-    else if (b.v.stun > 0) b.status = `STUNNED ${b.v.stun.toFixed(1)}s — x2 DAMAGE!`;
-    else if (mode === 'cross') b.status = 'Tether descending — dash through or stay low!';
-    else if (mode === 'scissor') b.status = 'Tether sweep — dash through to snap it!';
-    else b.status = 'Dash through the tether to stun both';
+    if (dead >= 0) {
+      const left = Math.max(0, b.parts[dead].timer).toFixed(1);
+      b.status = tr(
+        `${TWIN_NAMES[dead]} DOWN — kill ${TWIN_NAMES[1 - dead]} in ${left}s!`,
+        `${TWIN_NAMES[dead]} GỤC — hạ ${TWIN_NAMES[1 - dead]} trong ${left}s!`
+      );
+    } else if (b.v.stun > 0) b.status = stunnedStatus(b.v.stun);
+    else if (mode === 'cross') b.status = tr('Tether descending — dash through or stay low!', 'Dây nối hạ xuống — lướt xuyên qua hoặc bay thấp!');
+    else if (mode === 'scissor') b.status = tr('Tether sweep — dash through to snap it!', 'Dây nối quét ngang — lướt xuyên qua để bẻ gãy!');
+    else b.status = tr('Dash through the tether to stun both', 'Lướt xuyên dây nối để làm choáng cả hai');
 
     if (!api.alive || b.v.stun > 0) return;
     b.attackTimer -= dt;
@@ -559,7 +575,7 @@ const twins: BossBehavior = {
         api.hurtPlayer();
       } else if (p.bossContactCd <= 0) {
         p.bossContactCd = 0.35;
-        strikeFx(api, `${TWIN_NAMES[i]} STRIKE!`);
+        strikeFx(api, tr(`${TWIN_NAMES[i]} STRIKE!`, `ĐÁNH TRÚNG ${TWIN_NAMES[i]}!`));
         twinDamage(b, api, i, 8);
         api.pullPlayer(0, 70);
       }
@@ -613,10 +629,13 @@ const furnace: BossBehavior = {
       b.v.vent -= dt;
       if (b.v.vent <= 0) {
         api.sfx('block');
-        api.text(b.x, b.y + b.r + 10, 'VENTS SEALED', '#fdba74', 14);
+        api.text(b.x, b.y + b.r + 10, tr('VENTS SEALED', 'LỖ THÔNG HƠI ĐÃ ĐÓNG'), '#fdba74', 14);
       }
     }
-    b.status = b.v.vent > 0 ? `VENTS OPEN ${b.v.vent.toFixed(1)}s — FIRE AT THE CORE!` : 'Armored — dash INTO a Plasma Core to deflect it';
+    b.status =
+      b.v.vent > 0
+        ? tr(`VENTS OPEN ${b.v.vent.toFixed(1)}s — FIRE AT THE CORE!`, `LỖ THÔNG HƠI MỞ ${b.v.vent.toFixed(1)}s — BẮN VÀO LÕI!`)
+        : tr('Armored — dash INTO a Plasma Core to deflect it', 'Bọc giáp — lướt VÀO Lõi Plasma để phản nó lại');
     if (!ready) return;
     b.t += dt;
     b.x = api.W / 2 + Math.sin(b.t * 0.3) * api.W * 0.2;
@@ -640,14 +659,14 @@ const furnace: BossBehavior = {
     const p = api.player;
     if (dist(p.x, p.y, b.x, b.y) >= b.r * 0.85 + p.radius) return;
     if (!dashing) api.hurtPlayer();
-    else if (b.v.vent > 0) bodyContact(b, api, true, b.x, b.y, b.r, 14, 'MELTDOWN STRIKE!');
+    else if (b.v.vent > 0) bodyContact(b, api, true, b.x, b.y, b.r, 14, tr('MELTDOWN STRIKE!', 'ĐÒN NÓNG CHẢY!'));
     else bounce(api, b.x, b.y);
   },
   emp(b, api) {
     if (b.v.vent > 0) damage(b, api, b.maxHp * 0.06);
     else {
       b.v.vent = 2.5;
-      api.text(b.x, b.y + b.r + 12, 'EMP SHORTED THE ARMOR!', '#fde047', 15);
+      api.text(b.x, b.y + b.r + 12, tr('EMP SHORTED THE ARMOR!', 'EMP LÀM CHẬP GIÁP!'), '#fde047', 15);
     }
   },
   orbReturn(b, api) {
@@ -659,7 +678,7 @@ const furnace: BossBehavior = {
     api.slowmo(0.45, 0.3);
     api.shockwave(b.x, b.y, '#fb923c', 220, 6);
     api.particles(b.x, b.y, '#fdba74', 40, 340, true);
-    api.banner('VENTS OPEN — FIRE AT THE CORE!', 'neon-glow-amber');
+    api.banner(tr('VENTS OPEN — FIRE AT THE CORE!', 'LỖ THÔNG HƠI MỞ — BẮN VÀO LÕI!'), 'neon-glow-amber');
   },
 };
 
@@ -698,7 +717,7 @@ function wraithPop(b: BossEntity, api: BossApi, pt: BossPart, burst: boolean) {
   api.sfx('glitch');
   api.particles(pt.x, pt.y, '#c4b5fd', 24, 260, true);
   api.shockwave(pt.x, pt.y, '#a78bfa', 90, 3);
-  api.text(pt.x, pt.y - 20, burst ? 'DECOY!' : 'DECOY POPPED', '#ddd6fe', 15);
+  api.text(pt.x, pt.y - 20, burst ? tr('DECOY!', 'BẢN GIẢ!') : tr('DECOY POPPED', 'BẢN GIẢ ĐÃ VỠ'), '#ddd6fe', 15);
   if (burst) ring(api, pt.x, pt.y, 12, 140, Math.random(), { color: '#c4b5fd', ghost: true });
 }
 
@@ -781,8 +800,11 @@ const wraith: BossBehavior = {
 
     b.status =
       b.v.reveal > 0
-        ? `TRUE SIGNAL LOCKED ${b.v.reveal.toFixed(1)}s`
-        : `SCAN ${Math.floor(b.v.scan)}% — graze shots to reveal the real one`;
+        ? tr(`TRUE SIGNAL LOCKED ${b.v.reveal.toFixed(1)}s`, `ĐÃ KHÓA TÍN HIỆU THẬT ${b.v.reveal.toFixed(1)}s`)
+        : tr(
+            `SCAN ${Math.floor(b.v.scan)}% — graze shots to reveal the real one`,
+            `QUÉT ${Math.floor(b.v.scan)}% — sượt qua đạn để lộ bản thật`
+          );
 
     if (!api.alive || b.v.shuffle > 0 || b.v.lunge > 0) return;
     b.attackTimer -= dt;
@@ -817,7 +839,7 @@ const wraith: BossBehavior = {
       b.v.chunk += dmg;
       if (b.v.chunk >= b.maxHp * 0.18 && b.hp > 0) {
         b.v.chunk = 0;
-        api.text(pt.x, pt.y - 30, 'IT SHIFTS!', '#c4b5fd', 16);
+        api.text(pt.x, pt.y - 30, tr('IT SHIFTS!', 'NÓ ĐỔI CHỖ!'), '#c4b5fd', 16);
         wraithShuffle(b, api);
       }
       return 'hit';
@@ -835,7 +857,7 @@ const wraith: BossBehavior = {
         wraithPop(b, api, pt, false);
       } else if (p.bossContactCd <= 0) {
         p.bossContactCd = 0.35;
-        strikeFx(api, 'SOUL STRIKE!');
+        strikeFx(api, tr('SOUL STRIKE!', 'ĐÒN LINH HỒN!'));
         damage(b, api, 10);
         b.v.reveal = Math.max(b.v.reveal, 2);
         api.pullPlayer(0, 70);
@@ -853,8 +875,8 @@ const wraith: BossBehavior = {
       b.v.scan = 0;
       b.v.reveal = 6;
       api.sfx('powerup');
-      api.banner('TRUE SIGNAL LOCKED!', 'neon-glow-amber');
-      api.comm('iris', 'Got it! The marked one is real. Hit it!');
+      api.banner(tr('TRUE SIGNAL LOCKED!', 'ĐÃ KHÓA TÍN HIỆU THẬT!'), 'neon-glow-amber');
+      api.comm('iris', tr('Got it! The marked one is real. Hit it!', 'Bắt được rồi! Cái bị đánh dấu là thật. Bắn nó!'));
     }
   },
 };
@@ -874,7 +896,10 @@ function singularityNodeDown(b: BossEntity, api: BossApi, pt: BossPart) {
   api.shockwave(pt.x, pt.y, '#a5b4fc', 90, 3);
   api.particles(pt.x, pt.y, '#a5b4fc', 22, 260, true);
   const left = b.parts.filter((n) => n.alive).length;
-  api.text(pt.x, pt.y - 20, left ? `STABILIZER DOWN ${4 - left}/4` : 'ALL STABILIZERS DOWN!', '#c7d2fe', 15);
+  const downLabel = left
+    ? tr(`STABILIZER DOWN ${4 - left}/4`, `HẠ BỘ ỔN ĐỊNH ${4 - left}/4`)
+    : tr('ALL STABILIZERS DOWN!', 'ĐÃ HẠ CẢ 4 BỘ ỔN ĐỊNH!');
+  api.text(pt.x, pt.y - 20, downLabel, '#c7d2fe', 15);
   if (left === 0) {
     b.v.collapse = api.hard ? 6 : 7;
     b.v.surge = 0;
@@ -884,7 +909,7 @@ function singularityNodeDown(b: BossEntity, api: BossApi, pt: BossPart) {
     api.flash('#818cf8', 0.45);
     api.slowmo(0.4, 0.4);
     api.shockwave(b.x, b.y, '#ffffff', 300, 6);
-    api.banner('COLLAPSE — CORE EXPOSED!', 'neon-glow-amber');
+    api.banner(tr('COLLAPSE — CORE EXPOSED!', 'SỤP ĐỔ — LÕI LỘ RA!'), 'neon-glow-amber');
   }
 }
 
@@ -914,10 +939,10 @@ const singularity: BossBehavior = {
 
     const alive = b.parts.filter((n) => n.alive).length;
     b.status = collapsed
-      ? `COLLAPSE ${b.v.collapse.toFixed(1)}s — CORE EXPOSED, FIRE!`
+      ? tr(`COLLAPSE ${b.v.collapse.toFixed(1)}s — CORE EXPOSED, FIRE!`, `SỤP ĐỔ ${b.v.collapse.toFixed(1)}s — LÕI LỘ RA, BẮN!`)
       : b.v.surgeWarn > 0 || b.v.surge > 0
-      ? 'GRAVITY SURGE — fight the pull!'
-      : `Stabilizers ${alive}/4 — shoot them (your shots bend!)`;
+      ? tr('GRAVITY SURGE — fight the pull!', 'TRỌNG LỰC DÂNG TRÀO — chống lại lực hút!')
+      : tr(`Stabilizers ${alive}/4 — shoot them (your shots bend!)`, `Bộ Ổn Định ${alive}/4 — bắn chúng (đạn sẽ bị bẻ cong!)`);
     if (!ready) return;
 
     b.t += dt;
@@ -930,7 +955,7 @@ const singularity: BossBehavior = {
         b.v.rebuilds++;
         singularityNodes(b);
         api.sfx('boss_alarm');
-        api.banner('STABILIZERS REBUILT', 'neon-glow-pink');
+        api.banner(tr('STABILIZERS REBUILT', 'BỘ ỔN ĐỊNH ĐÃ TÁI TẠO'), 'neon-glow-pink');
       }
     }
     if (b.v.surgeWarn > 0) {
@@ -971,7 +996,7 @@ const singularity: BossBehavior = {
     } else {
       b.v.surgeWarn = 1.2;
       api.sfx('boss_alarm');
-      api.banner('GRAVITY SURGE!', 'neon-glow-pink');
+      api.banner(tr('GRAVITY SURGE!', 'TRỌNG LỰC DÂNG TRÀO!'), 'neon-glow-pink');
       for (let i = 0; i < 6; i++) api.drone(40 + Math.random() * (api.W - 80), -30 - i * 30, (Math.random() - 0.5) * 60, 120);
     }
   },
@@ -1003,8 +1028,8 @@ const singularity: BossBehavior = {
     }
     if (dist(p.x, p.y, b.x, b.y) >= b.r * 0.9 + p.radius * 0.6) return;
     if (!dashing) api.hurtPlayer();
-    else if (b.v.collapse > 0) bodyContact(b, api, true, b.x, b.y, b.r * 1.3, 12, 'CORE STRIKE!');
-    else bounce(api, b.x, b.y, 'REPELLED!');
+    else if (b.v.collapse > 0) bodyContact(b, api, true, b.x, b.y, b.r * 1.3, 12);
+    else bounce(api, b.x, b.y, tr('REPELLED!', 'BỊ ĐẨY LÙI!'));
   },
   emp(b, api) {
     if (b.v.collapse > 0) {
@@ -1025,13 +1050,16 @@ const singularity: BossBehavior = {
 // NULL — the final boss. Three phases that remix every Warden.
 // ---------------------------------------------------------------------------
 const ECHOES = ['gate', 'twins', 'forge', 'gravity', 'wraith'] as const;
-const ECHO_LINES: Record<(typeof ECHOES)[number], string> = {
-  gate: 'Remember the Gatekeeper? I built its gate.',
-  twins: 'Two signals, one will. Mine.',
-  forge: 'Fuel for the fire. You.',
-  gravity: 'Everything falls toward me.',
-  wraith: 'Which of me is real, pilot?',
+const ECHO_LINES: Record<(typeof ECHOES)[number], [en: string, vi: string]> = {
+  gate: ['Remember the Gatekeeper? I built its gate.', 'Nhớ Gatekeeper chứ? Chính ta dựng cánh cổng của nó.'],
+  twins: ['Two signals, one will. Mine.', 'Hai tín hiệu, một ý chí. Của ta.'],
+  forge: ['Fuel for the fire. You.', 'Nhiên liệu cho ngọn lửa. Là ngươi.'],
+  gravity: ['Everything falls toward me.', 'Mọi thứ đều rơi về phía ta.'],
+  wraith: ['Which of me is real, pilot?', 'Ta nào mới là thật, phi công?'],
 };
+
+const stunnedStatus = (stun: number) =>
+  tr(`STUNNED ${stun.toFixed(1)}s — x2 DAMAGE!`, `CHOÁNG ${stun.toFixed(1)}s — x2 SÁT THƯƠNG!`);
 
 function nullEnterPhase(b: BossEntity, api: BossApi, phase: number) {
   b.phase = phase;
@@ -1049,16 +1077,16 @@ function nullEnterPhase(b: BossEntity, api: BossApi, phase: number) {
     b.v.echo = 0;
     b.v.echoT = 0;
     b.v.announce = 1;
-    api.banner('PHASE 2 — ECHOES', 'neon-glow-pink');
-    api.comm('null', 'Fine. Let me show you your victories... in reverse.');
+    api.banner(tr('PHASE 2 — ECHOES', 'GIAI ĐOẠN 2 — TIẾNG VỌNG'), 'neon-glow-pink');
+    api.comm('null', tr('Fine. Let me show you your victories... in reverse.', 'Được thôi. Để ta cho ngươi xem lại các chiến thắng của mình... theo chiều ngược lại.'));
   } else {
     b.hp = b.maxHp * 0.25;
     b.v.lock = 1;
     b.v.keys = 5;
     b.v.keyDmg = b.hp / 5;
     b.v.curtainA = 0;
-    api.banner('PHASE 3 — DEFRAGMENT', 'neon-glow-pink');
-    api.comm('null', 'You brought me the Root Keys. How thoughtful.');
+    api.banner(tr('PHASE 3 — DEFRAGMENT', 'GIAI ĐOẠN 3 — CHỐNG PHÂN MẢNH'), 'neon-glow-pink');
+    api.comm('null', tr('You brought me the Root Keys. How thoughtful.', 'Ngươi mang Khóa Gốc đến cho ta. Chu đáo thật.'));
     for (let i = 0; i < 5; i++) {
       const a = (i / 5) * TAU + Math.random() * 0.4;
       const s = 110 + Math.random() * 40;
@@ -1066,7 +1094,7 @@ function nullEnterPhase(b: BossEntity, api: BossApi, phase: number) {
         id: api.nextId(),
         kind: 'key',
         color: '#fde047',
-        label: 'ROOT KEY',
+        label: tr('ROOT KEY', 'KHÓA GỐC'),
         x: b.x,
         y: b.y + 40,
         vx: Math.cos(a) * s,
@@ -1121,15 +1149,18 @@ const nullBoss: BossBehavior = {
 
     if (b.v.trans > 0) {
       b.v.trans -= dt;
-      b.status = 'NULL IS REWRITING ITSELF...';
+      b.status = tr('NULL IS REWRITING ITSELF...', 'NULL ĐANG TỰ VIẾT LẠI...');
       if (b.v.trans <= 0 && b.phase === 3) {
-        api.comm('iris', 'It scattered the Keys! Grab all five, each one is a reboot pulse!');
+        api.comm('iris', tr('It scattered the Keys! Grab all five, each one is a reboot pulse!', 'Nó rải các Khóa ra rồi! Nhặt đủ năm chiếc, mỗi chiếc là một xung khởi động lại!'));
       }
       return;
     }
 
     if (b.phase === 1) {
-      b.status = b.v.fieldOff > 0 ? `FIELD BREACHED ${b.v.fieldOff.toFixed(1)}s — FIRE!` : 'NULL FIELD — only Overdrive & Dash hurt it';
+      b.status =
+        b.v.fieldOff > 0
+          ? tr(`FIELD BREACHED ${b.v.fieldOff.toFixed(1)}s — FIRE!`, `TRƯỜNG ĐÃ THỦNG ${b.v.fieldOff.toFixed(1)}s — BẮN!`)
+          : tr('NULL FIELD — only Overdrive & Dash hurt it', 'TRƯỜNG NULL — chỉ Quá Tải & Lướt gây sát thương');
     } else if (b.phase === 2) {
       b.v.echoT += dt;
       if (b.v.echoT > 8.5) {
@@ -1142,15 +1173,15 @@ const nullBoss: BossBehavior = {
       }
       if (b.v.announce) {
         b.v.announce = 0;
-        api.comm('null', ECHO_LINES[nullEcho(b)]);
+        api.comm('null', tr(...ECHO_LINES[nullEcho(b)]));
       }
       const echo = nullEcho(b);
       b.status = {
-        gate: 'ECHO: GATE — fire through the gap',
-        twins: b.v.stun > 0 ? `STUNNED ${b.v.stun.toFixed(1)}s — x2 DAMAGE!` : 'ECHO: TETHER — dash through it!',
-        forge: 'ECHO: FORGE — parry the plasma cores!',
-        gravity: 'ECHO: GRAVITY — fight the pull',
-        wraith: 'ECHO: WRAITH — ghost shots fade in and out',
+        gate: tr('ECHO: GATE — fire through the gap', 'VỌNG: CỔNG — bắn qua khe hở'),
+        twins: b.v.stun > 0 ? stunnedStatus(b.v.stun) : tr('ECHO: TETHER — dash through it!', 'VỌNG: DÂY NỐI — lướt xuyên qua!'),
+        forge: tr('ECHO: FORGE — parry the plasma cores!', 'VỌNG: LÒ RÈN — phản lại lõi plasma!'),
+        gravity: tr('ECHO: GRAVITY — fight the pull', 'VỌNG: TRỌNG LỰC — chống lại lực hút'),
+        wraith: tr('ECHO: WRAITH — ghost shots fade in and out', 'VỌNG: WRAITH — đạn ma lúc ẩn lúc hiện'),
       }[echo];
       if (echo === 'gate') b.v.shield = (b.v.shield + dt * 1.0) % TAU;
       if (echo === 'gravity') applyGravity(api, b.x, b.y, dt, 110, 1, b.r * 0.8);
@@ -1166,15 +1197,18 @@ const nullBoss: BossBehavior = {
             b.v.tetherOff = 9;
             api.sfx('parry');
             api.slowmo(0.4, 0.35);
-            api.text(api.player.x, api.player.y - 26, 'TETHER SNAPPED!', '#fde047', 18);
-            api.banner('NULL STUNNED — x2 DAMAGE!', 'neon-glow-amber');
+            api.text(api.player.x, api.player.y - 26, tr('TETHER SNAPPED!', 'ĐỨT DÂY NỐI!'), '#fde047', 18);
+            api.banner(tr('NULL STUNNED — x2 DAMAGE!', 'NULL BỊ CHOÁNG — x2 SÁT THƯƠNG!'), 'neon-glow-amber');
           } else if (touch === 'hit') {
             api.hurtPlayer();
           }
         }
       }
     } else {
-      b.status = `DEFRAGMENT — collect the ROOT KEYS (${5 - b.v.keys}/5)`;
+      b.status = tr(
+        `DEFRAGMENT — collect the ROOT KEYS (${5 - b.v.keys}/5)`,
+        `CHỐNG PHÂN MẢNH — thu thập KHÓA GỐC (${5 - b.v.keys}/5)`
+      );
     }
 
     if (b.v.burst > 0) {
@@ -1271,7 +1305,7 @@ const nullBoss: BossBehavior = {
       }
       if (b.v.nullText <= 0) {
         b.v.nullText = 1.2;
-        api.text(bl.x, bl.y - 10, 'NULLIFIED', '#fca5a5', 13);
+        api.text(bl.x, bl.y - 10, tr('NULLIFIED', 'BỊ VÔ HIỆU'), '#fca5a5', 13);
       }
       return 'block';
     }
@@ -1284,13 +1318,13 @@ const nullBoss: BossBehavior = {
     const p = api.player;
     if (dist(p.x, p.y, b.x, b.y) >= b.r * 0.8 + p.radius) return;
     if (!dashing) api.hurtPlayer();
-    else if (b.phase === 3 || b.v.trans > 0) bounce(api, b.x, b.y, 'LOCKED!');
-    else bodyContact(b, api, true, b.x, b.y, b.r, b.v.stun > 0 ? 16 : 8, 'BREACH STRIKE!');
+    else if (b.phase === 3 || b.v.trans > 0) bounce(api, b.x, b.y, tr('LOCKED!', 'ĐÃ KHÓA!'));
+    else bodyContact(b, api, true, b.x, b.y, b.r, b.v.stun > 0 ? 16 : 8, tr('BREACH STRIKE!', 'ĐÒN XUYÊN PHÁ!'));
   },
   emp(b, api) {
     if (b.phase === 1) {
       b.v.fieldOff = 3.5;
-      api.banner('NULL FIELD BREACHED!', 'neon-glow-amber');
+      api.banner(tr('NULL FIELD BREACHED!', 'TRƯỜNG NULL ĐÃ THỦNG!'), 'neon-glow-amber');
     } else if (b.phase === 2) {
       damage(b, api, b.maxHp * 0.05);
     }
@@ -1303,7 +1337,7 @@ const nullBoss: BossBehavior = {
     api.shake(14);
     api.flash('#fb923c', 0.3);
     api.shockwave(b.x, b.y, '#fb923c', 200, 5);
-    api.text(b.x, b.y + b.r + 14, 'OWN FIRE RETURNED!', '#fdba74', 16);
+    api.text(b.x, b.y + b.r + 14, tr('OWN FIRE RETURNED!', 'GẬY ÔNG ĐẬP LƯNG ÔNG!'), '#fdba74', 16);
   },
   key(b, api) {
     if (b.phase !== 3) return;
@@ -1317,7 +1351,7 @@ const nullBoss: BossBehavior = {
     api.shockwave(b.x, b.y, '#fde047', 260, 6);
     api.shockwave(api.player.x, api.player.y, '#fde047', 160, 4);
     api.particles(b.x, b.y, '#fde047', 30, 300, true);
-    api.banner(`REBOOT PULSE ${n}/5`, 'neon-glow-amber');
+    api.banner(tr(`REBOOT PULSE ${n}/5`, `XUNG KHỞI ĐỘNG LẠI ${n}/5`), 'neon-glow-amber');
     if (b.v.keys <= 0) {
       b.v.lock = 0;
       b.hp = 0;

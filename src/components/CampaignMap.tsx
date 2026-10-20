@@ -1,6 +1,8 @@
 import React from 'react';
 import { ChevronRight, KeyRound, Lock, Skull, Star, X } from 'lucide-react';
 import { LEVELS } from '../game/campaign';
+import { tr } from '../i18n';
+import { localLevel } from '../i18n/content';
 import { SaveData } from '../types/game';
 import { sound } from '../utils/audio';
 
@@ -33,9 +35,11 @@ export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onCl
       <div className="glass-panel w-full max-w-md rounded-3xl p-4 sm:p-6 flex flex-col max-h-[94vh] anim-pop panel-glow-pink">
         <div className="flex items-start justify-between pb-3">
           <div>
-            <p className="text-[10px] uppercase tracking-[0.3em] text-rose-300 font-bold font-cyber">Campaign</p>
+            <p className="text-[10px] uppercase tracking-[0.3em] text-rose-300 font-bold font-cyber">{tr('Campaign', 'Chiến dịch')}</p>
             <h2 className="text-2xl font-black text-white font-cyber tracking-wide leading-none mt-0.5">GRIDFALL</h2>
-            <p className="text-xs text-slate-400 mt-1">Recover the Root Keys. Reach the Core. Reboot NULL.</p>
+            <p className="text-xs text-slate-400 mt-1">
+              {tr('Recover the Root Keys. Reach the Core. Reboot NULL.', 'Thu hồi Khóa Gốc. Tiến vào Lõi. Khởi động lại NULL.')}
+            </p>
           </div>
           <button
             type="button"
@@ -43,7 +47,7 @@ export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onCl
               sound.playSound('click');
               onClose();
             }}
-            aria-label="Close"
+            aria-label={tr('Close', 'Đóng')}
             className="w-8 h-8 shrink-0 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center btn-cyber border border-slate-700"
           >
             <X size={16} />
@@ -52,7 +56,7 @@ export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onCl
 
         <div className="flex items-center gap-2 mb-2 text-[11px] font-bold text-amber-200">
           <KeyRound size={13} className="text-amber-300" />
-          Root Keys
+          {tr('Root Keys', 'Khóa Gốc')}
           <span className="flex gap-1 ml-1">
             {[0, 1, 2, 3, 4].map((i) => (
               <span
@@ -65,7 +69,7 @@ export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onCl
 
         <div className="custom-scroll flex-1 py-1 pr-1">
           <ol className="relative space-y-2.5">
-            {LEVELS.map((lvl, i) => {
+            {LEVELS.map(localLevel).map((lvl, i) => {
               const locked = i > saveData.campaignUnlocked;
               const stars = saveData.campaignStars[lvl.id] || 0;
               const current = !locked && stars === 0;
@@ -108,14 +112,14 @@ export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onCl
                       <p className="text-sm font-black text-white leading-tight truncate">{lvl.name}</p>
                       <p className="text-[11px] text-slate-400 flex items-center gap-1 truncate">
                         <Skull size={10} className="shrink-0" />
-                        {locked ? 'Unknown signal' : lvl.bossName}
+                        {locked ? tr('Unknown signal', 'Tín hiệu lạ') : lvl.bossName}
                       </p>
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       <Stars count={stars} />
                       {!locked && (
                         <span className="flex items-center text-[10px] font-bold" style={{ color: lvl.accent }}>
-                          {current ? 'Start' : 'Replay'} <ChevronRight size={12} />
+                          {current ? tr('Start', 'Bắt đầu') : tr('Replay', 'Chơi lại')} <ChevronRight size={12} />
                         </span>
                       )}
                     </div>
@@ -127,7 +131,8 @@ export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onCl
         </div>
 
         <p className="text-[10px] text-slate-500 text-center mt-3 leading-snug">
-          ★ Clear the sector &nbsp;★ Take no hits &nbsp;★ Beat the boss under par time
+          ★ {tr('Clear the sector', 'Vượt khu vực')} &nbsp;★ {tr('Take no hits', 'Không trúng đòn')} &nbsp;★{' '}
+          {tr('Beat the boss under par time', 'Hạ boss trong thời gian chuẩn')}
         </p>
       </div>
     </div>

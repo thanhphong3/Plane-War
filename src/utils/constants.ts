@@ -1,4 +1,4 @@
-import { AchievementDef, QuestDef, SaveData, ShipDef, UpgradeDef } from '../types/game';
+import { AchievementDef, BossKind, PerkDef, QuestDef, SaveData, ShipDef, UpgradeDef } from '../types/game';
 
 export const STORAGE_KEY = 'neon_blitz_save_v2';
 
@@ -11,6 +11,7 @@ export const SHIPS: ShipDef[] = [
     secondary: '#0e7490',
     cost: 0,
     perk: 'Balanced',
+    weapon: 'Rapid Plasma — every 4th volley adds a piercing bolt',
     stats: {
       speed: 1.0,
       dashCd: 1.0,
@@ -26,6 +27,7 @@ export const SHIPS: ShipDef[] = [
     secondary: '#86198f',
     cost: 140,
     perk: '+35% Graze Zone',
+    weapon: 'Homing Needles — violet darts that hunt the nearest target',
     stats: {
       speed: 1.1,
       dashCd: 0.82,
@@ -41,6 +43,7 @@ export const SHIPS: ShipDef[] = [
     secondary: '#9f1239',
     cost: 320,
     perk: '+1 Starting Shield',
+    weapon: 'Solar Fireballs — heavy rounds that explode on impact',
     stats: {
       speed: 1.0,
       dashCd: 0.95,
@@ -57,6 +60,7 @@ export const SHIPS: ShipDef[] = [
     secondary: '#047857',
     cost: 580,
     perk: 'Long-Range Magnet',
+    weapon: 'Phase Railgun — hypersonic rails that pierce 2 enemies',
     stats: {
       speed: 1.05,
       dashCd: 0.9,
@@ -73,6 +77,7 @@ export const SHIPS: ShipDef[] = [
     secondary: '#b45309',
     cost: 950,
     perk: 'x1.5 Shards & +1 EMP',
+    weapon: 'Twin Wingman Drones — two escorts add covering fire',
     stats: {
       speed: 1.15,
       dashCd: 0.85,
@@ -149,6 +154,69 @@ export const UPGRADES: UpgradeDef[] = [
   },
 ];
 
+/** Mid-run Tactical Perks: pick 1 of 3 at Wave 2/4/6 and after each boss (Endless, Hardcore, Boss Rush). */
+export const PERKS: PerkDef[] = [
+  {
+    id: 'chain_dash',
+    name: 'Static Aftershock',
+    desc: 'When a Dash ends, lightning arcs into up to 3 nearby enemies.',
+    icon: 'zap',
+    color: '#67e8f9',
+  },
+  {
+    id: 'graze_shield',
+    name: 'Kinetic Capacitor',
+    desc: 'Every 18 grazes charge +1 Energy Shield (max 3).',
+    icon: 'shield',
+    color: '#38bdf8',
+  },
+  {
+    id: 'ricochet',
+    name: 'Prism Bounce',
+    desc: 'Your bullets bounce off the left and right edges once.',
+    icon: 'bounce',
+    color: '#a78bfa',
+  },
+  {
+    id: 'dash_decoy',
+    name: 'Holo Echo',
+    desc: 'Dashing leaves a hologram that lures enemy fire for 2.5s, then explodes.',
+    icon: 'ghost',
+    color: '#e879f9',
+  },
+  {
+    id: 'overdrive_nova',
+    name: 'Supernova Core',
+    desc: 'Starting and ending Overdrive wipes every enemy bullet off the screen.',
+    icon: 'sun',
+    color: '#fbbf24',
+  },
+  {
+    id: 'combo_missiles',
+    name: 'Swarm Protocol',
+    desc: 'At x10 combo or higher, launch 2 homing missiles every 1.8s.',
+    icon: 'rocket',
+    color: '#fb923c',
+  },
+  {
+    id: 'shard_frenzy',
+    name: 'Greed Overclock',
+    desc: 'Each shard refunds 0.15s of Dash cooldown and scores +25%.',
+    icon: 'gem',
+    color: '#fde047',
+  },
+  {
+    id: 'berserk_barrel',
+    name: 'Overcharge Barrel',
+    desc: '+35% fire rate and +25% bullet damage while you have no shield.',
+    icon: 'flame',
+    color: '#f43f5e',
+  },
+];
+
+/** Boss Rush gauntlet, easiest to hardest. */
+export const BOSS_RUSH_ORDER: BossKind[] = ['sentinel', 'gatekeeper', 'twins', 'furnace', 'wraith', 'singularity', 'null'];
+
 /** Highest in-run Weapon Power level (collected from POWER pickups). */
 export const MAX_WEAPON_LEVEL = 5;
 
@@ -218,7 +286,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     desc: 'Score 10,000 points or more in any mode.',
     icon: 'trophy',
     rewardShards: 200,
-    isEligible: (s) => Math.max(s.bestEndless, s.bestTimed, s.bestHardcore) >= 10000,
+    isEligible: (s) => Math.max(s.bestEndless, s.bestTimed, s.bestHardcore, s.bestBossRush) >= 10000,
   },
   {
     id: 'boss_hunter',
@@ -227,6 +295,14 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     icon: 'crown',
     rewardShards: 300,
     isEligible: (s) => s.totalBossKills >= 5,
+  },
+  {
+    id: 'boss_rush_clear',
+    title: 'Gauntlet Breaker',
+    desc: 'Clear Boss Rush: defeat all 7 bosses in one run.',
+    icon: 'crown',
+    rewardShards: 400,
+    isEligible: (s) => s.bestBossRushTime > 0,
   },
   {
     id: 'campaign_half',
@@ -270,6 +346,8 @@ export const INITIAL_SAVE: SaveData = {
   bestEndless: 0,
   bestTimed: 0,
   bestHardcore: 0,
+  bestBossRush: 0,
+  bestBossRushTime: 0,
   bestCombo: 1,
   bestFeverInRun: 0,
   totalRuns: 0,

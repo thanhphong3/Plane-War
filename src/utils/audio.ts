@@ -19,18 +19,62 @@ export type SoundType =
   | 'parry'
   | 'key'
   | 'glitch'
-  | 'comm';
+  | 'comm'
+  | 'perk_pick'
+  | 'railgun'
+  | 'homing_launch';
 
-// A-minor synthwave progression: Am - F - C - G (one chord per bar)
-const BASS_ROOTS = [55, 43.65, 65.41, 49];
-const ARP_CHORDS = [
-  [440, 523.25, 659.25, 880],
-  [349.23, 440, 523.25, 698.46],
-  [392, 523.25, 659.25, 783.99],
-  [392, 493.88, 587.33, 783.99],
-];
-const BPM = 128;
-const STEP = 60 / BPM / 4; // 16th note
+/** Soundtrack layers: cruising, boss fight, Overdrive. */
+export type BgmMode = 'normal' | 'boss' | 'fever';
+
+interface BgmProfile {
+  bpm: number;
+  bass: number[];
+  chords: number[][];
+  /** Lead synth low-pass cutoff (Hz). */
+  cutoff: number;
+}
+
+const BGM: Record<BgmMode, BgmProfile> = {
+  // A-minor synthwave: Am - F - C - G (one chord per bar)
+  normal: {
+    bpm: 128,
+    bass: [55, 43.65, 65.41, 49],
+    chords: [
+      [440, 523.25, 659.25, 880],
+      [349.23, 440, 523.25, 698.46],
+      [392, 523.25, 659.25, 783.99],
+      [392, 493.88, 587.33, 783.99],
+    ],
+    cutoff: 2600,
+  },
+  // D-minor tension: Dm - Bb - Gm - A (the major V pulls hard back to Dm)
+  boss: {
+    bpm: 138,
+    bass: [73.42, 58.27, 49, 55],
+    chords: [
+      [440, 587.33, 698.46, 880],
+      [466.16, 587.33, 698.46, 932.33],
+      [392, 466.16, 587.33, 783.99],
+      [440, 554.37, 659.25, 880],
+    ],
+    cutoff: 3400,
+  },
+  // Overdrive: same A-minor loop, faster and wide open
+  fever: {
+    bpm: 148,
+    bass: [55, 43.65, 65.41, 49],
+    chords: [
+      [440, 523.25, 659.25, 880],
+      [349.23, 440, 523.25, 698.46],
+      [392, 523.25, 659.25, 783.99],
+      [392, 493.88, 587.33, 783.99],
+    ],
+    cutoff: 7800,
+  },
+};
+
+const stepDur = (mode: BgmMode) => 60 / BGM[mode].bpm / 4; // 16th note
 
 class SoundManager {
   private ctx: AudioContext | null = null;
@@ -46,6 +90,9 @@ class SoundManager {
   private nextStepTime = 0;
   private step = 0;
   private intensity = 1;
+  private bgmMode: BgmMode = 'normal';
+  /** Requested layer; swapped in on the next bar line so chords never change mid-bar. */
+  private pendingMode: BgmMode = 'normal';
 
   public setMuted(muted: boolean) {
     this.muted = muted;
@@ -65,9 +112,14 @@ class SoundManager {
     return this.bgmMuted;
   }
 
-  /** 0 = calm (menu), 1 = normal run, 2 = overdrive / boss */
+  /** 0 = calm (menu, sparse drums and no lead), 1 = in a run. */
   public setIntensity(level: number) {
     this.intensity = level;
+  }
+
+  /** Crossfades the soundtrack between cruising, boss-fight and Overdrive layers at the next bar. */
+  public setBgmIntensity(mode: BgmMode) {
+    this.pendingMode = mode;
   }
 
   private applyBgmGain() {
@@ -289,6 +341,28 @@ class SoundManager {
           }
           break;
 
+        case 'perk_pick':
+          // Shimmering upward arpeggio + sparkle
+          [523.25, 783.99, 1046.5, 1567.98, 2093].forEach((f, i) => {
+            this.tone('triangle', f, f * 1.01, now + i * 0.05, 0.28, 0.11, out);
+          });
+          this.tone('sine', 261.63, 523.25, now, 0.35, 0.12, out);
+          this.noiseBurst(now + 0.1, 0.45, 0.08, 'highpass', 6000, out, 12000);
+          break;
+
+        case 'railgun':
+          // Sharp charged crack, quiet so rapid fire never gets fatiguing
+          this.tone('sawtooth', 2600, 320, now, 0.09, 0.05, out);
+          this.tone('sine', 1300, 2600, now, 0.05, 0.03, out);
+          this.noiseBurst(now, 0.08, 0.05, 'highpass', 4500, out, 9000);
+          break;
+
+        case 'homing_launch':
+          // Whoosh of a missile pair leaving the rails
+          this.noiseBurst(now, 0.32, 0.12, 'bandpass', 700, out, 3200);
+          this.tone('triangle', 200, 620, now, 0.22, 0.08, out);
+          break;
+
         case 'comm':
           this.tone('sine', 1320, 1320, now, 0.05, 0.05, out);
           this.tone('sine', 1760, 1760, now + 0.07, 0.06, 0.05, out);
@@ -327,8 +401,12 @@ class SoundManager {
       this.nextStepTime = ctx.currentTime + 0.05;
     }
     while (this.nextStepTime < ctx.currentTime + 0.12) {
+      // Layer changes land on a bar line (Overdrive cuts in on the next beat for punch)
+      if (this.pendingMode !== this.bgmMode && (this.step % 16 === 0 || (this.pendingMode === 'fever' && this.step % 4 === 0))) {
+        this.bgmMode = this.pendingMode;
+      }
       if (!this.muted && !this.bgmMuted) this.playStep(this.step, this.nextStepTime);
-      this.nextStepTime += STEP;
+      this.nextStepTime += stepDur(this.bgmMode);
       this.step = (this.step + 1) % 64;
     }
   }
@@ -337,63 +415,88 @@ class SoundManager {
     const out = this.bgmBus!;
     const bar = Math.floor(step / 16);
     const s = step % 16;
-    const lvl = this.intensity;
+    const calm = this.intensity <= 0;
+    const mode: BgmMode = calm ? 'normal' : this.bgmMode;
+    const prof = BGM[mode];
+    const boss = mode === 'boss';
+    const fever = mode === 'fever';
+    const STEP = stepDur(mode);
+    const ctx = this.ctx!;
 
     try {
-      // Kick: four on the floor (half time when calm)
-      if (s % 4 === 0 && (lvl > 0 || s % 8 === 0)) {
-        this.tone('sine', 150, 42, t, 0.22, 0.55, out);
+      // Kick: four on the floor (half time when calm), extra pickup kick in boss fights
+      if (s % 4 === 0 && (!calm || s % 8 === 0)) {
+        this.tone('sine', boss ? 165 : 150, 42, t, 0.22, boss ? 0.62 : 0.55, out);
       }
-      // Snare on 2 & 4
-      if (lvl > 0 && (s === 4 || s === 12)) {
-        this.noiseBurst(t, 0.16, 0.22, 'bandpass', 1900, out);
-        this.tone('triangle', 220, 160, t, 0.08, 0.12, out);
+      if (boss && (s === 10 || (bar === 3 && s === 14))) this.tone('sine', 150, 42, t, 0.18, 0.4, out);
+      // Snare on 2 & 4; boss fights add ghost notes and a fill on the last bar
+      if (!calm && (s === 4 || s === 12)) {
+        this.noiseBurst(t, 0.16, boss ? 0.3 : 0.22, 'bandpass', boss ? 2100 : 1900, out);
+        this.tone('triangle', 220, 160, t, 0.08, boss ? 0.16 : 0.12, out);
       }
-      // Hats on offbeats (16ths in overdrive)
-      if (s % 4 === 2 || (lvl >= 2 && s % 2 === 1)) {
-        this.noiseBurst(t, 0.04, s % 4 === 2 ? 0.1 : 0.05, 'highpass', 7000, out);
+      if (boss && (s === 7 || s === 15 || (bar === 3 && s >= 13))) {
+        this.noiseBurst(t, 0.07, 0.09, 'bandpass', 2600, out);
       }
-      // Bass: driving 8ths with octave pops
-      if (s % 2 === 0) {
-        const root = BASS_ROOTS[bar];
+      // Hats on offbeats (16ths in boss / overdrive)
+      if (s % 4 === 2 || ((boss || fever) && s % 2 === 1)) {
+        this.noiseBurst(t, 0.04, s % 4 === 2 ? 0.1 : 0.05, 'highpass', fever ? 9000 : 7000, out);
+      }
+      // Bass: driving 8ths with octave pops; rolling 16ths for bosses and Overdrive
+      if (s % 2 === 0 || boss || fever) {
+        const root = prof.bass[bar];
         const f = s % 8 === 6 ? root * 2 : root;
-        const ctx = this.ctx!;
         const osc = ctx.createOscillator();
         const filter = ctx.createBiquadFilter();
         const gain = ctx.createGain();
         osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(f, t);
         filter.type = 'lowpass';
-        filter.Q.value = 6;
-        filter.frequency.setValueAtTime(lvl >= 2 ? 900 : 520, t);
-        filter.frequency.exponentialRampToValueAtTime(140, t + 0.18);
-        gain.gain.setValueAtTime(0.16, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+        filter.Q.value = boss ? 9 : 6;
+        filter.frequency.setValueAtTime(fever ? 1300 : boss ? 820 : 520, t);
+        filter.frequency.exponentialRampToValueAtTime(140, t + STEP * 1.6);
+        const vol = s % 2 === 0 ? 0.16 : 0.1;
+        gain.gain.setValueAtTime(vol, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + STEP * 1.7);
         osc.connect(filter);
         filter.connect(gain);
         gain.connect(out);
         osc.start(t);
-        osc.stop(t + 0.22);
+        osc.stop(t + STEP * 1.8);
       }
-      // Arpeggio lead
-      if (lvl > 0) {
-        const chord = ARP_CHORDS[bar];
-        const pattern = [0, 1, 2, 3, 2, 1, 2, 3];
-        const note = chord[pattern[s % 8]] * (lvl >= 2 && s >= 8 ? 2 : 1);
-        this.tone('square', note, note, t, 0.09, lvl >= 2 ? 0.045 : 0.03, out);
+      // Arpeggio lead through a low-pass whose cutoff follows the layer
+      if (!calm) {
+        const chord = prof.chords[bar];
+        const pattern = fever ? [0, 1, 2, 3, 3, 2, 1, 2] : [0, 1, 2, 3, 2, 1, 2, 3];
+        const octave = fever ? 2 : boss && s >= 8 ? 2 : 1;
+        const note = chord[pattern[s % 8]] * octave;
+        const osc = ctx.createOscillator();
+        const filter = ctx.createBiquadFilter();
+        const gain = ctx.createGain();
+        osc.type = boss ? 'sawtooth' : 'square';
+        osc.frequency.setValueAtTime(note, t);
+        filter.type = 'lowpass';
+        filter.Q.value = fever ? 4 : 2;
+        filter.frequency.setValueAtTime(prof.cutoff, t);
+        filter.frequency.exponentialRampToValueAtTime(Math.max(600, prof.cutoff * 0.35), t + 0.09);
+        gain.gain.setValueAtTime(fever ? 0.05 : boss ? 0.042 : 0.032, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(out);
+        osc.start(t);
+        osc.stop(t + 0.11);
       }
       // Pad swell at the start of each bar
       if (s === 0) {
-        const chord = ARP_CHORDS[bar];
+        const chord = prof.chords[bar];
         for (let i = 0; i < 3; i++) {
-          const ctx = this.ctx!;
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
-          osc.type = 'triangle';
+          osc.type = boss ? 'sawtooth' : 'triangle';
           osc.frequency.setValueAtTime(chord[i] / 2, t);
           osc.detune.value = (i - 1) * 7;
           gain.gain.setValueAtTime(0.001, t);
-          gain.gain.exponentialRampToValueAtTime(0.035, t + 0.4);
+          gain.gain.exponentialRampToValueAtTime(boss ? 0.022 : 0.035, t + 0.4);
           gain.gain.exponentialRampToValueAtTime(0.001, t + STEP * 16);
           osc.connect(gain);
           gain.connect(out);

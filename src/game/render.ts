@@ -1,11 +1,13 @@
 import {
   BossEntity,
+  BulletEntity,
   GemEntity,
   HazardEntity,
   LaserEntity,
   PowerupEntity,
   StarEntity,
 } from '../types/game';
+import { canvasFont, getLang, tr } from '../i18n';
 import type { LevelTheme } from './campaign';
 
 type Ctx = CanvasRenderingContext2D;
@@ -169,6 +171,16 @@ export function drawShip(
 // ---------------------------------------------------------------------------
 // Background
 // ---------------------------------------------------------------------------
+/** Bends the background grid around a point (boss gravity, Dash shockwave). */
+export interface GridWell {
+  x: number;
+  y: number;
+  /** Falloff radius in px. */
+  r: number;
+  /** Pull strength: 0..0.45 pinches inward, negative pushes outward. */
+  s: number;
+}
+
 const NEBULAE = [
   { x: 0.2, y: 0.15, r: 0.65, color: '#7c3aed', speed: 6 },
   { x: 0.85, y: 0.55, r: 0.55, color: '#0891b2', speed: 9 },
@@ -185,7 +197,8 @@ export function drawBackground(
   fever: boolean,
   boss: boolean,
   warp: number,
-  theme?: LevelTheme
+  theme?: LevelTheme,
+  wells?: GridWell[]
 ) {
   const bg = ctx.createLinearGradient(0, 0, 0, H);
   if (fever) {
@@ -225,13 +238,48 @@ export function drawBackground(
   ctx.beginPath();
   const cell = 52;
   const xOff = (W % cell) / 2;
-  for (let x = xOff; x < W; x += cell) {
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, H);
-  }
-  for (let y = gridOffsetY - cell; y < H; y += cell) {
-    ctx.moveTo(0, y);
-    ctx.lineTo(W, y);
+  if (!wells || wells.length === 0) {
+    for (let x = xOff; x < W; x += cell) {
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+    }
+    for (let y = gridOffsetY - cell; y < H; y += cell) {
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+    }
+  } else {
+    // Gravity wells bend the grid: positive strength pinches it in, negative bulges it out
+    const step = 26;
+    let px = 0;
+    let py = 0;
+    const warpPoint = (x: number, y: number) => {
+      px = x;
+      py = y;
+      for (let k = 0; k < wells.length; k++) {
+        const w = wells[k];
+        const dx = w.x - x;
+        const dy = w.y - y;
+        const f = w.s * Math.exp(-(dx * dx + dy * dy) / (w.r * w.r));
+        px += dx * f;
+        py += dy * f;
+      }
+    };
+    for (let x = xOff; x < W; x += cell) {
+      warpPoint(x, 0);
+      ctx.moveTo(px, py);
+      for (let y = step; y <= H + step; y += step) {
+        warpPoint(x, y);
+        ctx.lineTo(px, py);
+      }
+    }
+    for (let y = gridOffsetY - cell; y < H; y += cell) {
+      warpPoint(0, y);
+      ctx.moveTo(px, py);
+      for (let x = step; x <= W + step; x += step) {
+        warpPoint(x, y);
+        ctx.lineTo(px, py);
+      }
+    }
   }
   ctx.stroke();
 
@@ -428,6 +476,15 @@ const POWER_LABELS: Record<PowerupEntity['kind'], string> = {
   power: 'POWER',
 };
 
+const POWER_LABELS_VI: Record<PowerupEntity['kind'], string> = {
+  shield: 'KHIÊN',
+  magnet: 'NAM CHÂM',
+  slow: 'CHẬM',
+  bomb: '+EMP',
+  key: 'KHÓA GỐC',
+  power: 'HỎA LỰC',
+};
+
 export function drawPowerup(ctx: Ctx, p: PowerupEntity, t: number) {
   const arming = !!p.armTime && p.armTime > 0;
   const y = p.y + Math.sin(p.pulse * 0.6) * 3; // gentle bob: pickups float, hazards don't
@@ -476,15 +533,16 @@ export function drawPowerup(ctx: Ctx, p: PowerupEntity, t: number) {
   drawPowerGlyph(ctx, p.kind, r * 0.5);
 
   // Name tag so new pilots know what they're grabbing
-  ctx.font = "800 9px 'Orbitron', sans-serif";
+  ctx.font = `800 9px ${canvasFont()}`;
+  const powerLabel = (getLang() === 'vi' ? POWER_LABELS_VI : POWER_LABELS)[p.kind];
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineJoin = 'round';
   ctx.strokeStyle = 'rgba(2,6,23,0.9)';
   ctx.lineWidth = 3;
-  ctx.strokeText(POWER_LABELS[p.kind], 0, r + 13);
+  ctx.strokeText(powerLabel, 0, r + 13);
   ctx.fillStyle = p.color;
-  ctx.fillText(POWER_LABELS[p.kind], 0, r + 13);
+  ctx.fillText(powerLabel, 0, r + 13);
   ctx.restore();
 
   if (!arming) {
@@ -566,15 +624,16 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     ctx.restore();
     if (!h.reflected) {
       ctx.save();
-      ctx.font = "800 10px 'Orbitron', sans-serif";
+      ctx.font = `800 10px ${canvasFont()}`;
+      const dashLabel = tr('DASH INTO IT', 'LƯỚT VÀO');
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.lineJoin = 'round';
       ctx.strokeStyle = 'rgba(2,6,23,0.9)';
       ctx.lineWidth = 3;
-      ctx.strokeText('DASH INTO IT', h.x, h.y + h.r + 20);
+      ctx.strokeText(dashLabel, h.x, h.y + h.r + 20);
       ctx.fillStyle = DASH_CUE;
-      ctx.fillText('DASH INTO IT', h.x, h.y + h.r + 20);
+      ctx.fillText(dashLabel, h.x, h.y + h.r + 20);
       ctx.restore();
     }
     return;
@@ -768,16 +827,17 @@ export function drawDashHint(ctx: Ctx, h: HazardEntity, t: number) {
   ctx.restore();
 
   ctx.save();
-  ctx.font = "900 11px 'Orbitron', sans-serif";
+  ctx.font = `900 11px ${canvasFont()}`;
+  const dashLabel = tr('DASH!', 'LƯỚT!');
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineJoin = 'round';
   ctx.globalAlpha = 0.75 + pulse * 0.25;
   ctx.strokeStyle = 'rgba(2,6,23,0.9)';
   ctx.lineWidth = 3;
-  ctx.strokeText('DASH!', h.x, h.y - s - 10);
+  ctx.strokeText(dashLabel, h.x, h.y - s - 10);
   ctx.fillStyle = DASH_CUE;
-  ctx.fillText('DASH!', h.x, h.y - s - 10);
+  ctx.fillText(dashLabel, h.x, h.y - s - 10);
   ctx.restore();
 }
 
@@ -898,4 +958,218 @@ export function drawBoss(ctx: Ctx, b: BossEntity, t: number) {
 
   ctx.restore();
   if (flash) drawGlow(ctx, b.x, b.y, b.r * 1.1, '#ffffff', 0.35);
+}
+
+// ---------------------------------------------------------------------------
+// Player weapons — one silhouette per signature round, all drawn additively
+// ---------------------------------------------------------------------------
+const TAU = Math.PI * 2;
+
+/** Draws one player bullet pointing along its velocity, with a glowing tail. */
+export function drawBullet(ctx: Ctx, b: BulletEntity, t: number) {
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.rotate(Math.atan2(b.vy, b.vx) + Math.PI / 2); // local -y = forward
+  switch (b.kind) {
+    case 'fireball': {
+      const flick = 0.85 + Math.sin(t * 40 + b.id) * 0.15;
+      const core = b.fever ? '#fbbf24' : '#fb923c';
+      ctx.fillStyle = hexToRgba('#ef4444', 0.45);
+      ctx.beginPath();
+      ctx.moveTo(-8, 0);
+      ctx.quadraticCurveTo(0, 38 * flick, 8, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = hexToRgba(core, 0.7);
+      ctx.beginPath();
+      ctx.moveTo(-5, 0);
+      ctx.quadraticCurveTo(0, 24 * flick, 5, 0);
+      ctx.closePath();
+      ctx.fill();
+      drawGlow(ctx, 0, 0, 22 * flick, core, 0.85);
+      drawGlow(ctx, 0, 0, 10, '#fde047', 0.9);
+      ctx.fillStyle = '#fff7ed';
+      ctx.beginPath();
+      ctx.arc(0, 0, 4.4, 0, TAU);
+      ctx.fill();
+      break;
+    }
+    case 'rail': {
+      const len = 40;
+      drawGlow(ctx, 0, 8, 18, b.color, 0.5);
+      ctx.fillStyle = hexToRgba(b.color, 0.35);
+      ctx.fillRect(-3.5, -12, 7, len + 12);
+      ctx.fillStyle = hexToRgba(b.color, 0.8);
+      ctx.fillRect(-2, -12, 4, len * 0.8);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(-0.9, -14, 1.8, len * 0.6);
+      // Phase rings sliding down the beam
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+      ctx.lineWidth = 1;
+      for (let k = 0; k < 2; k++) {
+        const ry = -8 + ((t * 160 + b.id * 7 + k * 14) % 28);
+        ctx.beginPath();
+        ctx.ellipse(0, ry, 5.5, 1.6, 0, 0, TAU);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'homing': {
+      ctx.strokeStyle = hexToRgba(b.color, 0.5);
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, 3);
+      ctx.quadraticCurveTo(Math.sin(t * 30 + b.id) * 4, 12, 0, 22);
+      ctx.stroke();
+      drawGlow(ctx, 0, 0, 13, b.color, 0.75);
+      ctx.fillStyle = '#f5f3ff';
+      ctx.beginPath();
+      ctx.moveTo(0, -9);
+      ctx.lineTo(2.6, 1.5);
+      ctx.lineTo(0, 5);
+      ctx.lineTo(-2.6, 1.5);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    case 'missile': {
+      const flick = 0.7 + Math.random() * 0.3;
+      drawGlow(ctx, 0, 10, 13 * flick, '#fb923c', 0.85);
+      drawGlow(ctx, 0, 8, 6, '#ffffff', 0.7 * flick);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillRect(-2.6, -6, 5.2, 12);
+      ctx.fillStyle = '#f97316';
+      ctx.beginPath();
+      ctx.moveTo(-2.6, -6);
+      ctx.lineTo(0, -11);
+      ctx.lineTo(2.6, -6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillRect(-5, 2, 2.4, 4.5);
+      ctx.fillRect(2.6, 2, 2.4, 4.5);
+      break;
+    }
+    case 'drone': {
+      drawGlow(ctx, 0, 0, 9, b.color, 0.65);
+      ctx.fillStyle = hexToRgba(b.color, 0.5);
+      ctx.fillRect(-1, 0, 2, 12);
+      ctx.fillStyle = '#fffbeb';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 1.7, 5, 0, 0, TAU);
+      ctx.fill();
+      break;
+    }
+    default: {
+      // Plasma spear; piercing bolts are bigger and ringed
+      const heavy = (b.pierce || 0) > 0;
+      const k = heavy ? 1.55 : 1;
+      ctx.fillStyle = hexToRgba(b.color, 0.45);
+      ctx.beginPath();
+      ctx.moveTo(-3 * k, 0);
+      ctx.lineTo(0, 24 * k);
+      ctx.lineTo(3 * k, 0);
+      ctx.closePath();
+      ctx.fill();
+      drawGlow(ctx, 0, -2, 12 * k, b.color, 0.6);
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.moveTo(0, -10 * k);
+      ctx.lineTo(2.3 * k, -1);
+      ctx.lineTo(0, 3.5 * k);
+      ctx.lineTo(-2.3 * k, -1);
+      ctx.closePath();
+      ctx.fill();
+      if (heavy) {
+        ctx.strokeStyle = hexToRgba(b.color, 0.9);
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.ellipse(0, -2, 7, 2.6, 0, 0, TAU);
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.restore();
+}
+
+/** Sovereign's wingman drone. */
+export function drawWingDrone(ctx: Ctx, x: number, y: number, t: number, color: string, k: number, flash: number) {
+  drawGlow(ctx, x, y + 4, 16, color, 0.4);
+  ctx.save();
+  ctx.translate(x, y);
+  // Thruster
+  const flick = 0.7 + Math.random() * 0.3;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = hexToRgba(color, 0.75);
+  ctx.beginPath();
+  ctx.moveTo(-3, 5);
+  ctx.lineTo(0, 5 + 12 * flick);
+  ctx.lineTo(3, 5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+  // Orbit ring
+  ctx.strokeStyle = hexToRgba(color, 0.6);
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([3, 4]);
+  ctx.lineDashOffset = -t * 24 * (k ? 1 : -1);
+  ctx.beginPath();
+  ctx.arc(0, 0, 11, 0, TAU);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // Body
+  ctx.rotate(Math.sin(t * 3 + k * 2) * 0.18);
+  ctx.fillStyle = '#1e293b';
+  ctx.beginPath();
+  ctx.moveTo(0, -8);
+  ctx.lineTo(6, 1);
+  ctx.lineTo(0, 6);
+  ctx.lineTo(-6, 1);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+  drawGlow(ctx, x, y - 1, 5, '#ffffff', 0.9);
+  if (flash > 0) drawGlow(ctx, x, y - 10, 9 * flash, '#fffbeb', flash * 0.9);
+}
+
+/** Jagged electric arc between two points (graze sparks, chain lightning). Re-jitters every frame. */
+export function drawLightning(ctx: Ctx, x1: number, y1: number, x2: number, y2: number, color: string, alpha: number) {
+  if (alpha <= 0.01) return;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const jitter = Math.min(16, len * 0.18);
+  const pts: number[] = [x1, y1];
+  for (let k = 1; k < 4; k++) {
+    const off = (Math.random() - 0.5) * 2 * jitter;
+    pts.push(x1 + dx * (k / 4) + nx * off, y1 + dy * (k / 4) + ny * off);
+  }
+  pts.push(x2, y2);
+  const path = () => {
+    ctx.beginPath();
+    ctx.moveTo(pts[0], pts[1]);
+    for (let k = 2; k < pts.length; k += 2) ctx.lineTo(pts[k], pts[k + 1]);
+  };
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.globalAlpha = Math.min(1, alpha);
+  ctx.strokeStyle = hexToRgba(color, 0.45);
+  ctx.lineWidth = 5;
+  path();
+  ctx.stroke();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.4;
+  path();
+  ctx.stroke();
+  ctx.restore();
+  drawGlow(ctx, x2, y2, 10, color, alpha * 0.8);
 }

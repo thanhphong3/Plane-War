@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Check, Lock, X } from 'lucide-react';
 import { SaveData, ShipDef } from '../types/game';
+import { tr } from '../i18n';
+import { localShip, localUpgrade } from '../i18n/content';
 import { SHIPS, UPGRADES, upgradeCost } from '../utils/constants';
 import { sound } from '../utils/audio';
 import { Icon, ShardIcon } from './Icon';
@@ -17,10 +19,10 @@ interface ShopModalProps {
 /** Normalised 0..1 stat values for the comparison bars. */
 function shipStats(ship: ShipDef) {
   return [
-    { label: 'Speed', value: (ship.stats.speed - 0.9) / 0.3 },
-    { label: 'Dash', value: (1.1 - ship.stats.dashCd) / 0.3 },
-    { label: 'Graze', value: (ship.stats.grazeRadius - 24) / 16 },
-    { label: 'Shards', value: ((ship.stats.shardMultiplier || 1) - 0.9) / 0.65 },
+    { label: tr('Speed', 'Tốc độ'), value: (ship.stats.speed - 0.9) / 0.3 },
+    { label: tr('Dash', 'Lướt'), value: (1.1 - ship.stats.dashCd) / 0.3 },
+    { label: tr('Graze', 'Sượt'), value: (ship.stats.grazeRadius - 24) / 16 },
+    { label: tr('Shards', 'Mảnh'), value: ((ship.stats.shardMultiplier || 1) - 0.9) / 0.65 },
   ];
 }
 
@@ -33,7 +35,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
       if (saveData.selectedShip === ship.id) return;
       sound.playSound('click');
       onUpdateSave({ ...saveData, selectedShip: ship.id });
-      onShowToast(`${ship.name} equipped`);
+      onShowToast(tr(`${ship.name} equipped`, `Đã trang bị ${ship.name}`));
     } else if (saveData.shards >= ship.cost) {
       sound.playSound('powerup');
       onUpdateSave({
@@ -42,16 +44,18 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
         unlockedShips: [...saveData.unlockedShips, ship.id],
         selectedShip: ship.id,
       });
-      onShowToast(`Unlocked: ${ship.name}!`);
+      onShowToast(tr(`Unlocked: ${ship.name}!`, `Đã mở khóa: ${ship.name}!`));
     } else {
       sound.playSound('click');
-      onShowToast(`Need ${(ship.cost - saveData.shards).toLocaleString('en-US')} more shards`);
+      const missing = (ship.cost - saveData.shards).toLocaleString('en-US');
+      onShowToast(tr(`Need ${missing} more shards`, `Cần thêm ${missing} mảnh`));
     }
   };
 
   const handleUpgrade = (upgradeId: keyof SaveData['upgrades']) => {
-    const def = UPGRADES.find((u) => u.id === upgradeId);
-    if (!def) return;
+    const found = UPGRADES.find((u) => u.id === upgradeId);
+    if (!found) return;
+    const def = localUpgrade(found);
     const currentLevel = saveData.upgrades[upgradeId] || 0;
     if (currentLevel >= def.maxLevel) return;
 
@@ -63,10 +67,11 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
         shards: saveData.shards - cost,
         upgrades: { ...saveData.upgrades, [upgradeId]: currentLevel + 1 },
       });
-      onShowToast(`${def.name} upgraded to Lv.${currentLevel + 1}!`);
+      onShowToast(tr(`${def.name} upgraded to Lv.${currentLevel + 1}!`, `${def.name} đã lên Lv.${currentLevel + 1}!`));
     } else {
       sound.playSound('click');
-      onShowToast(`Need ${(cost - saveData.shards).toLocaleString('en-US')} more shards`);
+      const missing = (cost - saveData.shards).toLocaleString('en-US');
+      onShowToast(tr(`Need ${missing} more shards`, `Cần thêm ${missing} mảnh`));
     }
   };
 
@@ -76,8 +81,10 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
         {/* Header */}
         <div className="flex items-center justify-between pb-3">
           <div>
-            <h2 className="text-xl sm:text-2xl font-black text-white font-cyber tracking-wide">HANGAR</h2>
-            <p className="text-xs text-slate-400">Unlock ships and upgrade your systems with Neon Shards</p>
+            <h2 className="text-xl sm:text-2xl font-black text-white font-cyber tracking-wide">{tr('HANGAR', 'XƯỞNG TÀU')}</h2>
+            <p className="text-xs text-slate-400">
+              {tr('Unlock ships and upgrade your systems with Neon Shards', 'Mở khóa tàu và nâng cấp hệ thống bằng Mảnh Neon')}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-200 text-sm font-black">
@@ -87,7 +94,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close"
+              aria-label={tr('Close', 'Đóng')}
               className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center btn-cyber border border-slate-700"
             >
               <X size={16} />
@@ -109,14 +116,14 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
                 tab === id ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-400/50' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {id === 'ships' ? 'Ships' : 'Upgrades'}
+              {id === 'ships' ? tr('Ships', 'Tàu') : tr('Upgrades', 'Nâng cấp')}
             </button>
           ))}
         </div>
 
         <div className="custom-scroll flex-1 py-3 pr-1 space-y-2.5">
           {tab === 'ships' &&
-            SHIPS.map((ship) => {
+            SHIPS.map(localShip).map((ship) => {
               const isUnlocked = saveData.unlockedShips.includes(ship.id);
               const isSelected = saveData.selectedShip === ship.id;
               const canAfford = saveData.shards >= ship.cost;
@@ -150,6 +157,9 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
                         </span>
                       </div>
                       <p className="text-xs text-slate-400 mt-0.5 leading-snug">{ship.desc}</p>
+                      <p className="text-[11px] mt-1 leading-snug font-semibold" style={{ color: ship.color }}>
+                        {ship.weapon}
+                      </p>
                       <div className="grid grid-cols-4 gap-1.5 mt-2">
                         {shipStats(ship).map((s) => (
                           <div key={s.label}>
@@ -184,13 +194,13 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
                   >
                     {isSelected ? (
                       <>
-                        <Check size={14} /> Equipped
+                        <Check size={14} /> {tr('Equipped', 'Đang dùng')}
                       </>
                     ) : isUnlocked ? (
-                      'Equip'
+                      tr('Equip', 'Trang bị')
                     ) : (
                       <>
-                        Unlock for <Icon name="gem" size={12} /> {ship.cost.toLocaleString('en-US')}
+                        {tr('Unlock for', 'Mở khóa với')} <Icon name="gem" size={12} /> {ship.cost.toLocaleString('en-US')}
                       </>
                     )}
                   </button>
@@ -199,7 +209,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
             })}
 
           {tab === 'upgrades' &&
-            UPGRADES.map((upgrade) => {
+            UPGRADES.map(localUpgrade).map((upgrade) => {
               const currentLevel = saveData.upgrades[upgrade.id] || 0;
               const isMax = currentLevel >= upgrade.maxLevel;
               const cost = upgradeCost(upgrade.baseCost, currentLevel);
@@ -263,7 +273,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
           onClick={onClose}
           className="mt-1 w-full py-3 rounded-2xl btn-primary text-slate-950 font-black text-sm uppercase font-cyber tracking-wider btn-cyber"
         >
-          Done
+          {tr('Done', 'Xong')}
         </button>
       </div>
     </div>

@@ -21,6 +21,8 @@ export function loadGameSave(): SaveData {
         : [],
       campaignUnlocked: typeof parsed.campaignUnlocked === 'number' ? parsed.campaignUnlocked : 0,
       campaignStars: Array.isArray(parsed.campaignStars) ? parsed.campaignStars : [],
+      bestBossRush: typeof parsed.bestBossRush === 'number' ? parsed.bestBossRush : 0,
+      bestBossRushTime: typeof parsed.bestBossRushTime === 'number' ? parsed.bestBossRushTime : 0,
     };
   } catch {
     return { ...INITIAL_SAVE };

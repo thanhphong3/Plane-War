@@ -1,3 +1,5 @@
+import { PerkId } from '../types/game';
+
 /** Live numbers the HUD shows; published by the game loop a few times per second. */
 export interface HudSnapshot {
   score: number;
@@ -21,6 +23,12 @@ export interface HudSnapshot {
   bossStatus: string;
   stageProgress: number;
   questProgress: number;
+  /** Tactical Perks installed this run. */
+  perks: PerkId[];
+  /** Kinetic Capacitor charge 0..1, or -1 without that perk. */
+  grazeCharge: number;
+  /** Boss Rush: current boss number (1-based), -1 outside Boss Rush. */
+  bossRush: number;
 }
 
 /**

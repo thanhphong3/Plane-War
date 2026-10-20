@@ -1,18 +1,23 @@
 import { GameState, ShipDef } from '../types/game';
 import { drawBossEntity } from './bossArt';
+import { canvasFont } from '../i18n';
 import { LevelDef } from './campaign';
 import { EngineState } from './engine';
 import {
+  GridWell,
   drawBackground,
+  drawBullet,
   drawDashHint,
   drawFog,
   drawGem,
   drawGlow,
   drawHazard,
   drawLaser,
+  drawLightning,
   drawPowerup,
   drawShip,
   drawVignette,
+  drawWingDrone,
   hexToRgba,
 } from './render';
 
@@ -29,7 +34,16 @@ export function renderScene(
   const W = e.W;
   const H = e.H;
 
-  drawBackground(ctx, W, H, t, e.gridOffsetY, e.bgStars, e.isFeverActive && st === 'PLAYING', !!e.boss, e.warp, level?.theme);
+  const inRun = st === 'PLAYING' || st === 'PAUSED' || st === 'PERK_SELECT';
+
+  // Gravity wells bend the grid: bosses pull it in, a Dash ripples it outward
+  const wells: GridWell[] = [];
+  if (e.boss) {
+    const b = e.boss;
+    wells.push({ x: b.x, y: b.y, r: b.r * (b.kind === 'singularity' ? 3.4 : 2.6), s: b.kind === 'singularity' ? 0.42 : 0.24 });
+  }
+  if (inRun && p.dashTimer > 0) wells.push({ x: p.x, y: p.y, r: 130, s: -0.5 * Math.min(1, p.dashTimer / 0.38) });
+  drawBackground(ctx, W, H, t, e.gridOffsetY, e.bgStars, e.isFeverActive && st === 'PLAYING', !!e.boss, e.warp, level?.theme, wells);
 
   ctx.save();
   if (e.screenShake > 0) {
@@ -62,11 +76,7 @@ export function renderScene(
   // Player bullets
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  for (const b of e.bullets) {
-    drawGlow(ctx, b.x, b.y, 12, b.color, 0.6);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(b.x - 1.5, b.y - 9, 3, 14);
-  }
+  for (const b of e.bullets) drawBullet(ctx, b, t);
   ctx.restore();
 
   for (const h of e.hazards) if (h.type !== 'shot') drawHazard(ctx, h, t, p.x, p.y);
@@ -77,8 +87,28 @@ export function renderScene(
   if (e.boss) drawBossEntity(ctx, e.boss, t, p.x, p.y, W);
   for (const h of e.hazards) if (h.type === 'shot') drawHazard(ctx, h, t, p.x, p.y);
 
+  // Holo Echo decoys: flickering ghost ships that soak up fire, pulsing faster before they blow
+  for (const d of e.decoys) {
+    const k = d.life / d.maxLife;
+    const pulse = Math.sin(t * (10 + (1 - k) * 30));
+    drawGlow(ctx, d.x, d.y, p.radius * (2.4 + pulse * 0.3), '#e879f9', 0.35 + (1 - k) * 0.3);
+    ctx.save();
+    ctx.strokeStyle = hexToRgba('#f0abfc', 0.25 + (1 - k) * 0.4);
+    ctx.setLineDash([5, 7]);
+    ctx.lineDashOffset = t * 30;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, 30 + pulse * 3, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.translate(d.x, d.y);
+    ctx.globalAlpha = 0.35 + Math.max(0, pulse) * 0.25;
+    drawShip(ctx, ship.id, p.radius, '#e879f9', '#86198f', t, 0.6);
+    ctx.restore();
+  }
+
   // Player
-  if ((st === 'PLAYING' || st === 'PAUSED') && !e.isDying) {
+  if (inRun && !e.isDying) {
     const mainColor = e.isFeverActive ? '#fbbf24' : ship.color;
 
     // Afterglow trail
@@ -105,6 +135,29 @@ export function renderScene(
     ctx.save();
     ctx.translate(p.x, p.y);
     if (blinking && Math.sin(t * 40) < 0) ctx.globalAlpha = 0.35;
+
+    // Combo halo on the floor under the ship: violet at x10, gold and spinning at x20
+    if (e.combo >= 10 && !e.isFeverActive) {
+      const hot = e.combo >= 20;
+      const col = hot ? '#fbbf24' : '#e879f9';
+      drawGlow(ctx, 0, p.radius * 0.6, p.radius * (hot ? 3 : 2.4), col, 0.22 + Math.sin(t * 6) * 0.06);
+      ctx.save();
+      ctx.strokeStyle = hexToRgba(col, 0.75);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(0, p.radius * 0.8, p.radius * 1.7, p.radius * 0.55, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      if (hot) {
+        ctx.strokeStyle = hexToRgba('#fde68a', 0.85);
+        ctx.setLineDash([6, 6]);
+        ctx.lineDashOffset = -t * 60;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(0, p.radius * 0.8, p.radius * 2.3, p.radius * 0.78, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
 
     // Overdrive aura
     if (e.isFeverActive) {
@@ -146,7 +199,33 @@ export function renderScene(
     ctx.rotate(p.angle + Math.PI / 2);
     const thrust = p.dashTimer > 0 ? 2 : e.isFeverActive ? 1.6 : 1 + Math.max(0, -p.vy) * 0.002;
     drawShip(ctx, ship.id, p.radius, mainColor, e.isFeverActive ? '#b45309' : ship.secondary, t, thrust);
+
+    // Muzzle flash at the nose
+    if (p.muzzleFlash > 0) {
+      const mf = p.muzzleFlash;
+      const ny = -p.radius * 1.55;
+      drawGlow(ctx, 0, ny, p.radius * 1.3 * mf, mainColor, mf * 0.9);
+      drawGlow(ctx, 0, ny, p.radius * 0.6 * mf, '#ffffff', mf);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = hexToRgba('#ffffff', 0.8 * mf);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let k = 0; k < 4; k++) {
+        const a = -Math.PI / 2 + (k - 1.5) * 0.55;
+        const len = p.radius * (k === 1 || k === 2 ? 1.1 : 0.6) * mf;
+        ctx.moveTo(0, ny);
+        ctx.lineTo(Math.cos(a) * len, ny + Math.sin(a) * len);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
     ctx.restore();
+
+    // Sovereign's wingman drones
+    if (ship.id === 'sovereign') {
+      p.drones.forEach((d, k) => drawWingDrone(ctx, d.x, d.y, t, mainColor, k, p.volley % 2 === 0 ? p.muzzleFlash : 0));
+    }
   }
 
   // Particles
@@ -168,9 +247,13 @@ export function renderScene(
   }
   ctx.restore();
 
-  if (level?.fog && (st === 'PLAYING' || st === 'PAUSED')) drawFog(ctx, W, H, p.x, p.y, 240, t);
+  // Graze sparks & chain lightning
+  for (const a of e.grazeArcs) drawLightning(ctx, a.x1, a.y1, a.x2, a.y2, a.color, a.alpha);
+
+  if (level?.fog && inRun) drawFog(ctx, W, H, p.x, p.y, 240, t);
 
   // Floating texts with a pop-in scale
+  const font = canvasFont();
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -178,7 +261,7 @@ export function renderScene(
   for (const ft of e.floatingTexts) {
     const pop = 1 + Math.max(0, 1 - ft.age * 7) * 0.5;
     ctx.globalAlpha = Math.max(0, ft.alpha);
-    ctx.font = `700 ${Math.round(ft.size * pop)}px 'Orbitron', 'Rajdhani', system-ui, sans-serif`;
+    ctx.font = `700 ${Math.round(ft.size * pop)}px ${font}`;
     ctx.strokeStyle = 'rgba(2, 6, 23, 0.85)';
     ctx.lineWidth = 4;
     ctx.strokeText(ft.text, ft.x, ft.y);

@@ -1,6 +1,8 @@
 import React from 'react';
 import { Check, X } from 'lucide-react';
 import { SaveData } from '../types/game';
+import { tr } from '../i18n';
+import { localAchievement } from '../i18n/content';
 import { ACHIEVEMENTS } from '../utils/constants';
 import { sound } from '../utils/audio';
 import { Icon, ShardIcon } from './Icon';
@@ -28,13 +30,15 @@ export const AchievementsModal: React.FC<AchievementsModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between pb-3">
           <div>
-            <h2 className="text-xl sm:text-2xl font-black text-white font-cyber tracking-wide">ACHIEVEMENTS</h2>
-            <p className="text-xs text-slate-400">Complete challenges to earn bonus shards</p>
+            <h2 className="text-xl sm:text-2xl font-black text-white font-cyber tracking-wide">{tr('ACHIEVEMENTS', 'THÀNH TỰU')}</h2>
+            <p className="text-xs text-slate-400">
+              {tr('Complete challenges to earn bonus shards', 'Hoàn thành thử thách để nhận thêm mảnh')}
+            </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={tr('Close', 'Đóng')}
             className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center btn-cyber border border-slate-700"
           >
             <X size={16} />
@@ -55,7 +59,7 @@ export const AchievementsModal: React.FC<AchievementsModalProps> = ({
         </div>
 
         <div className="custom-scroll flex-1 py-3 space-y-2.5 pr-1">
-          {ACHIEVEMENTS.map((ach) => {
+          {ACHIEVEMENTS.map(localAchievement).map((ach) => {
             const isUnlocked = saveData.unlockedAchievements.includes(ach.id);
             const isEligible = isUnlocked || ach.isEligible(saveData);
 
@@ -91,7 +95,7 @@ export const AchievementsModal: React.FC<AchievementsModalProps> = ({
                 <div className="shrink-0">
                   {isUnlocked ? (
                     <span className="px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 font-bold text-xs flex items-center gap-1">
-                      <Check size={13} /> Claimed
+                      <Check size={13} /> {tr('Claimed', 'Đã nhận')}
                     </span>
                   ) : isEligible ? (
                     <button
@@ -102,7 +106,7 @@ export const AchievementsModal: React.FC<AchievementsModalProps> = ({
                       }}
                       className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-300 to-amber-500 text-slate-950 font-black text-xs btn-cyber shadow-lg shadow-amber-500/30 flex items-center gap-1 claim-bounce"
                     >
-                      Claim <ShardIcon size={12} className="!text-slate-900 !drop-shadow-none" /> {ach.rewardShards}
+                      {tr('Claim', 'Nhận')} <ShardIcon size={12} className="!text-slate-900 !drop-shadow-none" /> {ach.rewardShards}
                     </button>
                   ) : (
                     <span className="px-2.5 py-1 rounded-xl bg-slate-800 text-slate-400 font-semibold text-xs border border-slate-700 flex items-center gap-1">
@@ -120,7 +124,7 @@ export const AchievementsModal: React.FC<AchievementsModalProps> = ({
           onClick={onClose}
           className="mt-1 w-full py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs uppercase font-cyber btn-cyber border border-slate-700"
         >
-          Close
+          {tr('Close', 'Đóng')}
         </button>
       </div>
     </div>

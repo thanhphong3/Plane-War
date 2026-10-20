@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, ChevronsRight, KeyRound, Play, Skull } from 'lucide-react';
 import { LevelDef, SPEAKERS } from '../game/campaign';
+import { tr } from '../i18n';
 import { sound } from '../utils/audio';
 
 interface StoryScreenProps {
@@ -87,7 +88,7 @@ export const StoryScreen: React.FC<StoryScreenProps> = ({ level, kind, isFinal, 
             }}
             className="flex items-center gap-1 px-3 py-1.5 rounded-full glass-panel text-xs font-bold text-slate-300 btn-cyber"
           >
-            <ArrowLeft size={14} /> Menu
+            <ArrowLeft size={14} /> {tr('Menu', 'Menu')}
           </button>
         ) : (
           <span />
@@ -102,7 +103,7 @@ export const StoryScreen: React.FC<StoryScreenProps> = ({ level, kind, isFinal, 
             }}
             className="flex items-center gap-1 px-3 py-1.5 rounded-full glass-panel text-xs font-bold text-slate-300 btn-cyber"
           >
-            Skip <ChevronsRight size={14} />
+            {tr('Skip', 'Bỏ qua')} <ChevronsRight size={14} />
           </button>
         )}
       </div>
@@ -122,14 +123,14 @@ export const StoryScreen: React.FC<StoryScreenProps> = ({ level, kind, isFinal, 
         ) : (
           <>
             <p className="text-xs font-bold tracking-[0.4em] font-cyber text-amber-300">
-              {isFinal ? 'CORE REBOOTED' : 'SECTOR CLEARED'}
+              {isFinal ? tr('CORE REBOOTED', 'LÕI ĐÃ KHỞI ĐỘNG LẠI') : tr('SECTOR CLEARED', 'ĐÃ GIẢI PHÓNG KHU VỰC')}
             </p>
             <h1 className="text-3xl sm:text-5xl font-black font-cyber text-white uppercase mt-1 neon-glow-amber">
-              {isFinal ? 'The Grid Lives' : `${level.bossName} Falls`}
+              {isFinal ? tr('The Grid Lives', 'Lưới Hồi Sinh') : tr(`${level.bossName} Falls`, `${level.bossName} Gục Ngã`)}
             </h1>
             {!isFinal && (
               <p className="text-sm text-amber-200 mt-2 flex items-center justify-center gap-1.5 font-bold">
-                <KeyRound size={15} /> Root Key {keyNumber}/5 recovered
+                <KeyRound size={15} /> {tr(`Root Key ${keyNumber}/5 recovered`, `Đã thu hồi Khóa Gốc ${keyNumber}/5`)}
               </p>
             )}
           </>
@@ -148,13 +149,13 @@ export const StoryScreen: React.FC<StoryScreenProps> = ({ level, kind, isFinal, 
                 <Skull size={22} />
               </span>
               <div>
-                <p className="text-[10px] font-bold tracking-[0.25em] text-slate-400 font-cyber">TARGET</p>
+                <p className="text-[10px] font-bold tracking-[0.25em] text-slate-400 font-cyber">{tr('TARGET', 'MỤC TIÊU')}</p>
                 <p className="text-lg font-black text-white font-cyber leading-tight">{level.bossName}</p>
                 <p className="text-xs text-slate-400">{level.bossTitle}</p>
               </div>
             </div>
             <p className="mt-3 text-[10px] font-bold tracking-[0.25em] font-cyber" style={{ color: level.accent }}>
-              HOW TO TAKE IT DOWN
+              {tr('HOW TO TAKE IT DOWN', 'CÁCH HẠ GỤC')}
             </p>
             <ul className="mt-1.5 space-y-1.5">
               {level.intel.map((tip) => (
@@ -172,7 +173,7 @@ export const StoryScreen: React.FC<StoryScreenProps> = ({ level, kind, isFinal, 
               }}
               className="mt-4 w-full py-3.5 rounded-2xl btn-primary text-slate-950 font-black text-base uppercase font-cyber tracking-[0.15em] btn-cyber animate-glow flex items-center justify-center gap-2"
             >
-              <Play size={18} fill="currentColor" /> Launch
+              <Play size={18} fill="currentColor" /> {tr('Launch', 'Xuất kích')}
             </button>
           </div>
         ) : (
@@ -206,7 +207,7 @@ export const StoryScreen: React.FC<StoryScreenProps> = ({ level, kind, isFinal, 
                 ))}
               </span>
               <span className={`text-[10px] font-bold text-slate-400 uppercase tracking-wider ${done ? 'animate-pulse' : 'opacity-0'}`}>
-                Tap to continue ▸
+                {tr('Tap to continue ▸', 'Chạm để tiếp tục ▸')}
               </span>
             </div>
           </div>

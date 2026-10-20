@@ -5,6 +5,7 @@ import {
   GemEntity,
   HazardEntity,
   LaserEntity,
+  PerkId,
   ParticleEntity,
   PowerupEntity,
   ShockwaveEntity,
@@ -74,6 +75,29 @@ export function createEngineState() {
     bossKillsThisRun: 0,
     nextBossTime: 55,
 
+    // Boss Rush: index of the boss being fought (or next up), intermission countdown
+    bossRushIndex: -1,
+    bossRushTimer: 0,
+    /** All seven bosses are down: victory lap before the results screen. */
+    bossRushWon: false,
+
+    // Tactical Perks
+    activePerks: [] as PerkId[],
+    /** Seconds until the perk picker opens (0 = nothing pending). */
+    perkPendingTimer: 0,
+    /** Three choices shown by the perk picker. */
+    perkOffer: [] as PerkId[],
+    /** Why the picker opened (shown as its subtitle). */
+    perkReason: '',
+    /** Highest wave milestone that already granted a perk. */
+    perkWaveMilestone: 0,
+    /** Kinetic Capacitor: grazes banked towards the next shield. */
+    grazeCounterForShield: 0,
+    /** Swarm Protocol launch timer. */
+    missileTimer: 0,
+    /** Holo Echo decoys left behind by Dashes. */
+    decoys: [] as { x: number; y: number; life: number; maxLife: number }[],
+
     // Campaign stage: fly through the sector, then fight its Warden
     stagePhase: 'stage' as 'stage' | 'boss' | 'clear',
     stageTimer: 0,
@@ -104,6 +128,15 @@ export function createEngineState() {
       autoFireTimer: 0,
       /** Weapon Power 1..MAX_WEAPON_LEVEL: how many barrels the auto-blaster fires. */
       weaponLevel: 1,
+      /** Auto-blaster volleys fired this run (drives every-Nth-shot weapon tricks). */
+      volley: 0,
+      /** 1 right after a volley, fades out fast — the nose flash. */
+      muzzleFlash: 0,
+      /** Sovereign's wingman drones (smoothly trail their slots beside the ship). */
+      drones: [
+        { x: window.innerWidth / 2 - 34, y: window.innerHeight * 0.75 },
+        { x: window.innerWidth / 2 + 34, y: window.innerHeight * 0.75 },
+      ],
       bossContactCd: 0,
       angle: -Math.PI / 2,
     },
@@ -116,6 +149,8 @@ export function createEngineState() {
     bullets: [] as BulletEntity[],
     particles: [] as ParticleEntity[],
     shockwaves: [] as ShockwaveEntity[],
+    /** Jagged electric arcs: graze sparks and Static Aftershock lightning. */
+    grazeArcs: [] as { x1: number; y1: number; x2: number; y2: number; color: string; alpha: number }[],
     floatingTexts: [] as FloatingTextEntity[],
     bgStars: [] as StarEntity[],
 

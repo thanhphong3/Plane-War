@@ -28,6 +28,21 @@
   font-family: 'Orbitron', monospace, sans-serif;
 }
 
+/* Vietnamese: Rajdhani and Orbitron have no Vietnamese diacritics, so swap in look-alikes that do */
+html[lang='vi'],
+html[lang='vi'] body,
+html[lang='vi'] #root {
+  font-family: 'Chakra Petch', system-ui, -apple-system, sans-serif;
+}
+
+html[lang='vi'] .font-cyber {
+  font-family: 'Exo 2', sans-serif;
+}
+
+html[lang='vi'] .font-cyber.title-logo {
+  font-family: 'Orbitron', monospace, sans-serif;
+}
+
 .safe-area {
   padding-top: max(0.75rem, env(safe-area-inset-top));
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
