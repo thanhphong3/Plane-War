@@ -19,17 +19,31 @@ export const fxPrefs = { reduceFlash: false };
 // Color helpers & cached glow sprites (additive blending is far cheaper than
 // shadowBlur on mobile GPUs)
 // ---------------------------------------------------------------------------
+// Hot path (every bullet / particle / frame): parse each hex once, then only concat the alpha.
+const rgbaPrefix = new Map<string, string>();
 export function hexToRgba(hex: string, a: number): string {
-  const h = hex.replace('#', '');
-  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+  let pre = rgbaPrefix.get(hex);
+  if (pre === undefined) {
+    const h = hex.replace('#', '');
+    const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
+    pre = `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, `;
+    if (rgbaPrefix.size > 512) rgbaPrefix.clear();
+    rgbaPrefix.set(hex, pre);
+  }
+  return pre + a + ')';
 }
 
 const glowCache = new Map<string, HTMLCanvasElement>();
+const GLOW_CACHE_MAX = 192;
 
 function getGlow(color: string): HTMLCanvasElement {
   let c = glowCache.get(color);
   if (c) return c;
+  // Bounded: blended colours (biome cross-fades) must never grow this without limit
+  if (glowCache.size >= GLOW_CACHE_MAX) {
+    const oldest = glowCache.keys().next().value;
+    if (oldest !== undefined) glowCache.delete(oldest);
+  }
   c = document.createElement('canvas');
   c.width = c.height = 64;
   const g = c.getContext('2d')!;

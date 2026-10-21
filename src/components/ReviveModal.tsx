@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { HeartPulse, X } from 'lucide-react';
-import { tr, useLang } from '../i18n';
+import { tr, useLang, numLocale } from '../i18n';
 import { sound } from '../utils/audio';
 import { ShardIcon } from './Icon';
 
@@ -30,10 +30,15 @@ export const ReviveModal: React.FC<ReviveModalProps> = ({ isOpen, cost, shards, 
     doneRef.current = false;
     setArmed(false);
     setLeft(DECIDE_TIME);
-    const start = performance.now();
+    // Countdown only runs while the page is visible: a notification or app switch must not cost the run
+    let elapsed = 0;
+    let last = performance.now();
     const arm = window.setTimeout(() => setArmed(true), ARM_DELAY_MS);
     const id = window.setInterval(() => {
-      const remaining = Math.max(0, DECIDE_TIME - (performance.now() - start) / 1000);
+      const now = performance.now();
+      if (!document.hidden) elapsed += (now - last) / 1000;
+      last = now;
+      const remaining = Math.max(0, DECIDE_TIME - elapsed);
       setLeft(remaining);
       if (remaining <= 0 && !doneRef.current) {
         doneRef.current = true;
@@ -70,7 +75,7 @@ export const ReviveModal: React.FC<ReviveModalProps> = ({ isOpen, cost, shards, 
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm anim-fade">
-      <div className="glass-panel w-full max-w-xs rounded-3xl p-6 text-center anim-pop panel-glow">
+      <div className="glass-panel w-full max-w-xs rounded-3xl p-6 text-center max-h-[calc(100dvh-2rem)] custom-scroll *:shrink-0 anim-pop panel-glow">
         <div className="relative w-28 h-28 mx-auto">
           <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 100 100">
             <circle cx="50" cy="50" r={ringR} fill="none" stroke="rgba(51,65,85,0.9)" strokeWidth="5" />
@@ -99,7 +104,7 @@ export const ReviveModal: React.FC<ReviveModalProps> = ({ isOpen, cost, shards, 
         </p>
         <p className="text-[11px] text-slate-400 mt-1">
           {tr('Score so far', 'Điểm hiện tại')}{' '}
-          <span className="font-black text-cyan-200 tabular-nums">{score.toLocaleString('en-US')}</span>
+          <span className="font-black text-cyan-200 tabular-nums">{score.toLocaleString(numLocale())}</span>
         </p>
 
         <div className="mt-4 space-y-2">
@@ -112,7 +117,7 @@ export const ReviveModal: React.FC<ReviveModalProps> = ({ isOpen, cost, shards, 
             {tr('Revive', 'Hồi sinh')} · <ShardIcon size={15} className="!text-slate-950 !drop-shadow-none" /> {cost}
           </button>
           <p className="text-[10px] text-slate-500">
-            {tr('You have', 'Bạn có')} {shards.toLocaleString('en-US')} {tr('shards · one revive per run', 'mảnh · mỗi lượt một lần')}
+            {tr('You have', 'Bạn có')} {shards.toLocaleString(numLocale())} {tr('shards · one revive per run', 'mảnh · mỗi lượt một lần')}
           </p>
           <button
             type="button"

@@ -46,6 +46,9 @@ html[lang='vi'] .font-cyber.title-logo {
 .safe-area {
   padding-top: max(0.75rem, env(safe-area-inset-top));
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  /* Landscape phones: keep the score and buttons clear of the notch */
+  padding-left: max(0.75rem, env(safe-area-inset-left));
+  padding-right: max(0.75rem, env(safe-area-inset-right));
 }
 
 /* ---------- Neon text & boxes ---------- */
@@ -224,7 +227,8 @@ html[lang='vi'] .font-cyber.title-logo {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .anim-pop, .anim-fade, .anim-drop, .title-logo, .btn-primary, .animate-glow, .combo-hot, .claim-bounce, .dash-ready {
+  .anim-pop, .anim-fade, .anim-drop, .title-logo, .btn-primary, .animate-glow, .combo-hot, .claim-bounce, .dash-ready,
+  .animate-pulse, .animate-ping, .animate-bounce, .animate-spin, .bar-fever, .bar-fever::after {
     animation: none;
   }
 }

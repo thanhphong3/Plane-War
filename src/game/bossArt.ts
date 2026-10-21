@@ -1,6 +1,6 @@
 import { BossEntity, BossPart } from '../types/game';
 import { TWIN_NAMES } from './bosses';
-import { drawBoss, drawGlow, hexToRgba } from './render';
+import { drawBoss, drawGlow, fxPrefs, hexToRgba } from './render';
 
 type Ctx = CanvasRenderingContext2D;
 const TAU = Math.PI * 2;
@@ -425,7 +425,7 @@ function drawWraith(ctx: Ctx, b: BossEntity, t: number, px: number, py: number) 
   const real = b.parts.find((p) => p.real && p.alive);
   if (real && b.v.reveal > 0) drawReticle(ctx, real.x, real.y, real.r * 1.3, '#f43f5e', t);
   if (b.v.lunge === 1) {
-    const blink = Math.sin(t * 30) > 0 ? 1 : 0.4;
+    const blink = fxPrefs.reduceFlash ? 0.85 : Math.sin(t * 30) > 0 ? 1 : 0.4;
     ctx.save();
     ctx.globalAlpha = blink;
     drawReticle(ctx, b.v.lx, b.v.ly, 26, '#c084fc', -t);
@@ -483,7 +483,7 @@ function drawSingularity(ctx: Ctx, b: BossEntity, t: number) {
   }
   if (b.v.surgeWarn > 0 || b.v.surge > 0) {
     ctx.save();
-    ctx.strokeStyle = `rgba(244,63,94,${0.4 + Math.sin(t * 20) * 0.3})`;
+    ctx.strokeStyle = `rgba(244,63,94,${fxPrefs.reduceFlash ? 0.55 : 0.4 + Math.sin(t * 20) * 0.3})`;
     ctx.lineWidth = 3;
     ctx.setLineDash([10, 8]);
     ctx.lineDashOffset = t * 80;
@@ -561,7 +561,7 @@ function drawNullCore(ctx: Ctx, b: BossEntity, t: number, offX: number, offY: nu
   // Fragmented rotating ring
   for (let i = 0; i < 8; i++) {
     const a0 = b.angle + (i / 8) * TAU;
-    const jitter = Math.random() < 0.08 ? (Math.random() - 0.5) * 12 : 0;
+    const jitter = !fxPrefs.reduceFlash && Math.random() < 0.08 ? (Math.random() - 0.5) * 12 : 0;
     ctx.strokeStyle = tint || (i % 2 ? '#f87171' : '#f8fafc');
     ctx.lineWidth = 4;
     ctx.beginPath();
@@ -634,7 +634,7 @@ function drawNull(ctx: Ctx, b: BossEntity, t: number, W: number) {
   }
 
   // Chromatic glitch copies
-  if (Math.random() < 0.18) {
+  if (!fxPrefs.reduceFlash && Math.random() < 0.18) {
     ctx.save();
     ctx.globalAlpha = 0.45;
     drawNullCore(ctx, b, t, (Math.random() - 0.5) * 14, 0, '#22d3ee');

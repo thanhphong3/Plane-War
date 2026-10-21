@@ -75,7 +75,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, settings, 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md anim-fade">
-      <div className="glass-panel w-full max-w-sm rounded-3xl p-5 sm:p-6 flex flex-col max-h-[94vh] anim-pop panel-glow">
+      <div className="glass-panel w-full max-w-sm rounded-3xl p-5 sm:p-6 flex flex-col max-h-[94dvh] anim-pop panel-glow">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-black text-white font-cyber tracking-wide">{tr('SETTINGS', 'CÀI ĐẶT')}</h2>
           <button

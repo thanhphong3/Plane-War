@@ -17,7 +17,7 @@ import {
 } from '../game/progression';
 import { fxPrefs } from '../game/render';
 import { renderScene } from '../game/scene';
-import { tr, useLang } from '../i18n';
+import { tr, useLang, numLocale } from '../i18n';
 import { localLevel, localModifier, masteryRewardLabel, questLabel } from '../i18n/content';
 import {
   BossEntity,
@@ -74,6 +74,12 @@ const CLEAR_DELAY = 2.6;
 
 /** Boss is on station and can be fought (not flying in or retreating). */
 const bossReady = (b: BossEntity) => b.entered && b.timeLeft > 0;
+
+/** Removes one hazard by identity (safe even if the array was replaced or compacted mid-iteration). */
+const removeHazard = (e: EngineState, h: EngineState['hazards'][number]) => {
+  const idx = e.hazards.indexOf(h);
+  if (idx >= 0) e.hazards.splice(idx, 1);
+};
 
 /** Raises the auto-blaster's Weapon Power by one level (lost again when a shield breaks). */
 const POWER_PICKUP = { kind: 'power' as const, color: '#fb923c', label: 'WEAPON POWER' };
@@ -263,6 +269,10 @@ export const NeonGame: React.FC = () => {
   // Revive offer (cost in shards) and the Settings screen
   const [reviveOffer, setReviveOffer] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const isSettingsOpenRef = useRef(false);
+  /** Day key the current Daily Challenge run was started on. */
+  const dailyRunDateRef = useRef('');
+  isSettingsOpenRef.current = isSettingsOpen;
 
   // Sound toggles
   const [isMuted, setIsMuted] = useState(saveData.muted);
@@ -338,16 +348,17 @@ export const NeonGame: React.FC = () => {
 
   // Start the soundtrack on the first user gesture (browsers block autoplay)
   useEffect(() => {
-    const kick = () => {
+    // pointerdown alone is not a valid unlock gesture for touch on iOS/Android: listen to the
+    // events that are, and keep listening until the context really runs.
+    const events = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'] as const;
+    const stop = () => events.forEach((ev) => window.removeEventListener(ev, kick));
+    function kick() {
       sound.ensureContext();
       sound.startBgm();
-    };
-    window.addEventListener('pointerdown', kick, { once: true });
-    window.addEventListener('keydown', kick, { once: true });
-    return () => {
-      window.removeEventListener('pointerdown', kick);
-      window.removeEventListener('keydown', kick);
-    };
+      if (sound.isRunning()) stop();
+    }
+    events.forEach((ev) => window.addEventListener(ev, kick));
+    return stop;
   }, []);
 
   const updateSave = useCallback((newSave: SaveData) => {
@@ -453,7 +464,9 @@ export const NeonGame: React.FC = () => {
   // ========================================================
   // ENGINE DATA (mutated inside the 60FPS animation loop)
   // ========================================================
-  const engineRef = useRef<EngineState>(createEngineState());
+  // Lazy init: useRef(createEngineState()) would build and discard a whole engine on every re-render
+  const [initialEngine] = useState(createEngineState);
+  const engineRef = useRef<EngineState>(initialEngine);
 
   const getActiveShip = useCallback((): ShipDef => {
     const cur = saveDataRef.current;
@@ -630,6 +643,13 @@ export const NeonGame: React.FC = () => {
     e.lasers = [];
     e.powerups = e.powerups.filter((pu) => pu.kind !== 'key');
     if (finale) {
+      // Last-second clutch: a shot already in flight finished the final boss while the ship was exploding.
+      // The victory wins — otherwise the death timer ran out first and the run ended as a crash.
+      if (e.isDying) {
+        e.isDying = false;
+        e.deathTimer = 0;
+        addFloatingText(e.player.x, e.player.y - 40, tr('CLUTCH!', 'PHÚT CHÓT!'), '#fbbf24');
+      }
       e.stagePhase = 'clear';
       e.clearTimer = CLEAR_DELAY;
       e.player.invulnTimer = Math.max(e.player.invulnTimer, CLEAR_DELAY + 1);
@@ -669,7 +689,7 @@ export const NeonGame: React.FC = () => {
 
     addPts(2000 * b.level + 150 * e.combo, 'boss');
     const bonus = Math.round((2000 * b.level + 150 * e.combo) * e.scoreMult);
-    addFloatingText(b.x, b.y, `+${bonus.toLocaleString('en-US')}`, '#fde047', 26);
+    addFloatingText(b.x, b.y, `+${bonus.toLocaleString(numLocale())}`, '#fde047', 26);
     showCenterBanner(
       rushWon
         ? tr('BOSS RUSH COMPLETE!', 'PHÁ ĐẢO BOSS RUSH!')
@@ -680,7 +700,7 @@ export const NeonGame: React.FC = () => {
           )
         : campaign
         ? tr(`${b.name} DEFEATED!`, `ĐÃ HẠ ${b.name}!`)
-        : tr(`${b.name} DESTROYED! +${bonus.toLocaleString('en-US')}`, `ĐÃ PHÁ ${b.name}! +${bonus.toLocaleString('en-US')}`),
+        : tr(`${b.name} DESTROYED! +${bonus.toLocaleString(numLocale())}`, `ĐÃ PHÁ ${b.name}! +${bonus.toLocaleString(numLocale())}`),
       'neon-glow-amber'
     );
     advanceQuest('boss', 1);
@@ -728,7 +748,7 @@ export const NeonGame: React.FC = () => {
 
     const bonus = converted * 80 * e.combo;
     addPts(bonus, 'combat');
-    showCenterBanner(`${tr('EMP BLAST!', 'NỔ EMP!')} +${Math.round(bonus * e.scoreMult).toLocaleString('en-US')}`, 'neon-glow-amber');
+    showCenterBanner(`${tr('EMP BLAST!', 'NỔ EMP!')} +${Math.round(bonus * e.scoreMult).toLocaleString(numLocale())}`, 'neon-glow-amber');
     // After the banner so boss-specific EMP reactions can override it
     if (e.boss && bossApiRef.current && bossReady(e.boss)) BOSSES[e.boss.kind].emp(e.boss, bossApiRef.current);
   }, [spawnParticles, showCenterBanner, addShockwave, addPts, flashScreen]);
@@ -901,7 +921,8 @@ export const NeonGame: React.FC = () => {
       // Boss Rush and arcade Wardens borrow each Warden's campaign tuning; the Rush Sentinel is a fixed MK-2
       const src = !level && kind !== 'sentinel' ? LEVELS.find((l) => l.boss === kind) : undefined;
       const def = level ?? (src ? localLevel(src) : null);
-      const tier = def ? def.id + 1 + loop * 3 : rush ? 2 : e.bossCount;
+      // Arcade Sentinels scale per rotation lap like the other Wardens (it used to jump straight to MK-8 on lap 2)
+      const tier = def ? def.id + 1 + loop * 3 : rush ? 2 : arcade ? 1 + loop * 3 : e.bossCount;
       const hard = gameModeRef.current === 'hardcore';
       // Each lap of the arcade rotation brings tougher Wardens
       const arcadeHp = arcade ? (0.85 + loop * 0.35) * (hard ? 1.25 : 1) : 1;
@@ -1329,8 +1350,11 @@ export const NeonGame: React.FC = () => {
       const isDaily = mode === 'daily';
       const bestKey =
         mode === 'timed' ? 'bestTimed' : mode === 'hardcore' ? 'bestHardcore' : rush ? 'bestBossRush' : 'bestEndless';
-      // Daily runs compete with today's best only
-      const today = currentDaily(cur);
+      // Daily runs compete with the best of the day the run STARTED (a run crossing midnight
+      // must not post yesterday's seed as today's score or pay today's streak bonus)
+      const runDay = dailyRunDateRef.current || undefined;
+      const today = currentDaily(cur, runDay);
+      const sameDay = !isDaily || cur.daily.date === today.date || dayKey() === today.date;
       const previousBest = campaign ? 0 : isDaily ? today.best : cur[bestKey];
       const isNewRecord = !campaign && finalScore > previousBest;
 
@@ -1342,7 +1366,7 @@ export const NeonGame: React.FC = () => {
       const newBestTime = won && (prevTime <= 0 || clearTime < prevTime);
 
       // Daily Challenge: the first run of the day pays a streak bonus
-      const dailyPay = isDaily && !today.rewarded ? dailyBonus(today.streak, e.waveLevel) : 0;
+      const dailyPay = isDaily && sameDay && !today.rewarded ? dailyBonus(today.streak, e.waveLevel) : 0;
       e.runShardsEarned += dailyPay;
 
       const mastery = masteryReport(cur, e);
@@ -1350,7 +1374,7 @@ export const NeonGame: React.FC = () => {
         ...withRunTotals(cur, e, getActiveShip().id),
         ...(campaign || isDaily ? {} : { [bestKey]: Math.max(previousBest, finalScore) }),
         ...(newBestTime ? { bestBossRushTime: clearTime } : {}),
-        ...(isDaily ? { daily: { ...today, best: Math.max(today.best, finalScore), rewarded: true } } : {}),
+        ...(isDaily && sameDay ? { daily: { ...today, best: Math.max(today.best, finalScore), rewarded: true } } : {}),
         totalRuns: cur.totalRuns + 1,
         shards: cur.shards + e.runShardsEarned,
       });
@@ -1631,6 +1655,7 @@ export const NeonGame: React.FC = () => {
     }
     if (save !== save0) updateSave(save);
     setSpawnSeed(isDaily ? daySeed(today) : null);
+    dailyRunDateRef.current = isDaily ? today : '';
     e.modifiers = isDaily ? dailyModifiers(today) : [];
     e.questDate = dq.date;
     e.questProgress = [...dq.progress];
@@ -1907,6 +1932,7 @@ export const NeonGame: React.FC = () => {
       if (gameStateRef.current === 'PLAYING') togglePause();
     };
     const onVis = () => {
+      sound.setPageHidden(document.hidden);
       if (document.hidden) releaseInput();
     };
     document.addEventListener('visibilitychange', onVis);
@@ -1928,13 +1954,20 @@ export const NeonGame: React.FC = () => {
 
     let animId: number;
     let lastTime = performance.now();
-    let hudSyncCounter = 0;
+    let hudAcc = 0;
+    let trailAcc = 0;
+    let lastRenderedState = '';
+    let needsRender = true;
 
     const resize = () => {
       const e = engineRef.current;
-      e.W = window.innerWidth;
-      e.H = window.innerHeight;
+      // Size from the element itself (not innerHeight): on mobile the toolbar makes 100vh ≠ visible area,
+      // which used to stretch the playfield and push the ship below the screen edge.
+      const rect = canvas.getBoundingClientRect();
+      e.W = Math.max(1, Math.round(rect.width || window.innerWidth));
+      e.H = Math.max(1, Math.round(rect.height || window.innerHeight));
       e.dpr = Math.min(window.devicePixelRatio || 1, 2);
+      needsRender = true;
       canvas.width = Math.floor(e.W * e.dpr);
       canvas.height = Math.floor(e.H * e.dpr);
       ctx.setTransform(e.dpr, 0, 0, e.dpr, 0, 0);
@@ -1960,6 +1993,9 @@ export const NeonGame: React.FC = () => {
       }
     };
     window.addEventListener('resize', resize);
+    window.visualViewport?.addEventListener('resize', resize);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null;
+    ro?.observe(canvas);
     resize();
 
     // ---------- Boss bridge: everything a boss behaviour may do to the world ----------
@@ -2371,10 +2407,9 @@ export const NeonGame: React.FC = () => {
       }
 
       // Tactical Perk picker opens after a short beat (lets a boss explosion land first)
+      // While dying the countdown just holds, so a revive still gets the earned perk.
       if (e.perkPendingTimer > 0) {
-        if (!alive) {
-          e.perkPendingTimer = 0;
-        } else {
+        if (alive) {
           e.perkPendingTimer -= rawDt;
           if (e.perkPendingTimer <= 0) {
             e.perkPendingTimer = 0;
@@ -2461,7 +2496,7 @@ export const NeonGame: React.FC = () => {
         if (e.feverTimeLeft <= 0) {
           e.isFeverActive = false;
           e.feverEnergy = 0;
-          p.invulnTimer = 0.8;
+          p.invulnTimer = Math.max(p.invulnTimer, 0.8);
           novaBlast();
           refreshMusic();
         }
@@ -2522,10 +2557,16 @@ export const NeonGame: React.FC = () => {
         p.vy = (p.y - prevY) / Math.max(0.001, rawDt);
 
         const targetAngle = -Math.PI / 2 + Math.max(-0.45, Math.min(0.45, p.vx * 0.0012));
-        p.angle += (targetAngle - p.angle) * 0.25;
+        // Frame-rate independent smoothing (was a fixed 0.25 per frame)
+        p.angle += (targetAngle - p.angle) * (1 - Math.exp(-17 * rawDt));
 
-        p.trail.unshift({ x: p.x, y: p.y, dash: isDashingOrFever });
-        if (p.trail.length > 16) p.trail.pop();
+        // Sample the trail at a fixed 60 Hz so its length looks the same on 30/60/144 Hz screens
+        trailAcc += rawDt;
+        if (trailAcc >= 1 / 60) {
+          trailAcc = Math.min(trailAcc - 1 / 60, 1 / 60);
+          p.trail.unshift({ x: p.x, y: p.y, dash: isDashingOrFever });
+          if (p.trail.length > 16) p.trail.pop();
+        }
 
         // Sovereign's wingman drones glide after their slots beside the wings
         if (ship.id === 'sovereign') {
@@ -2675,7 +2716,7 @@ export const NeonGame: React.FC = () => {
           spawnHazardWave();
           // Past the speed cap, Endless keeps escalating with extra enemies rather than faster ones
           const overflow = Math.max(0, e.waveLevel - SPEED_CAP_WAVE);
-          if (overflow > 0 && Math.random() < Math.min(0.45, overflow * 0.05)) spawnHazardWave();
+          if (overflow > 0 && rand() < Math.min(0.45, overflow * 0.05)) spawnHazardWave();
           const baseInterval = Math.max(0.25, 0.76 - e.waveLevel * 0.045);
           e.hazardTimer =
             (baseInterval * (hard ? 0.78 : 1) * (bossActive ? bossSpawnMult : 1)) / scale / (hasMod('swarm') ? 1.35 : 1);
@@ -2790,6 +2831,12 @@ export const NeonGame: React.FC = () => {
         pu.y += pu.vy * worldDt;
         pu.pulse += rawDt * 5;
         if (pu.kind === 'key') {
+          // Keys belong to a live boss: once it retreats or dies they dissolve instead of bouncing forever
+          if (!e.boss || !bossReady(e.boss)) {
+            spawnParticles(pu.x, pu.y, pu.color, 8, 120);
+            e.powerups.splice(i, 1);
+            continue;
+          }
           // Root Keys drift and bounce around the lower arena until collected
           if ((pu.x < 30 && (pu.vx || 0) < 0) || (pu.x > e.W - 30 && (pu.vx || 0) > 0)) pu.vx = -(pu.vx || 0);
           if ((pu.y < e.H * 0.3 && pu.vy < 0) || (pu.y > e.H - 40 && pu.vy > 0)) pu.vy = -pu.vy;
@@ -2943,6 +2990,8 @@ export const NeonGame: React.FC = () => {
       // Hazards
       for (let i = e.hazards.length - 1; i >= 0; i--) {
         const h = e.hazards[i];
+        // The list can be swapped mid-loop (Supernova wipe, boss defeat): skip holes, remove by identity
+        if (!h) continue;
         if (h.hitFlash && h.hitFlash > 0) h.hitFlash -= rawDt;
 
         if (h.type === 'seeker') {
@@ -3036,11 +3085,11 @@ export const NeonGame: React.FC = () => {
             h.y += h.vy * worldDt;
             if (tb && bossReady(tb) && Math.hypot(tb.x - h.x, tb.y - h.y) < tb.r + h.r * 0.5) {
               spawnParticles(h.x, h.y, '#67e8f9', 20, 260, true);
-              e.hazards.splice(i, 1);
+              removeHazard(e, h);
               BOSSES[tb.kind].orbReturn?.(tb, api, h);
               continue;
             }
-            if (h.y < -60 || h.y > e.H + 60 || h.x < -60 || h.x > e.W + 60) e.hazards.splice(i, 1);
+            if (h.y < -60 || h.y > e.H + 60 || h.x < -60 || h.x > e.W + 60) removeHazard(e, h);
             continue;
           }
           // Lazy homing towards the pilot until the fuse runs out
@@ -3061,7 +3110,7 @@ export const NeonGame: React.FC = () => {
             addShockwave(h.x, h.y, '#fb923c', 90, 3);
             spawnParticles(h.x, h.y, '#fdba74', 14, 220);
             for (let k = 0; k < 10; k++) pushShot(h.x, h.y, (k / 10) * Math.PI * 2, 150, { color: '#fdba74' });
-            e.hazards.splice(i, 1);
+            removeHazard(e, h);
             continue;
           }
         } else {
@@ -3134,12 +3183,12 @@ export const NeonGame: React.FC = () => {
                 advanceQuest('combo', e.combo);
                 noteDashSmash();
               }
-              e.hazards.splice(i, 1);
+              removeHazard(e, h);
               continue;
             }
             // While invulnerable (spawn, post-shield, victory lap) enemies just pass through
             if (p.invulnTimer <= 0) {
-              e.hazards.splice(i, 1);
+              removeHazard(e, h);
               if (hitPlayer()) break;
               continue;
             }
@@ -3189,14 +3238,8 @@ export const NeonGame: React.FC = () => {
           (h.type === 'kamikaze' && h.lunging && h.y < -60) ||
           (h.type === 'seeker' && (h.life || 0) <= 0)
         ) {
-          e.hazards.splice(i, 1);
+          removeHazard(e, h);
         }
-      }
-
-      // HUD throttle sync
-      hudSyncCounter++;
-      if (hudSyncCounter % 4 === 0) {
-        syncHud();
       }
     };
 
@@ -3268,24 +3311,48 @@ export const NeonGame: React.FC = () => {
       renderScene(ctx, engineRef.current, st, st === 'MENU' ? null : getLevel(), getActiveShip());
     };
 
+    // Max simulation step: at 30 FPS a frame is split in two so fast bullets can't tunnel through the ship.
+    const MAX_STEP = 1 / 55;
     const loop = (now: number) => {
+      // Schedule first: one bad frame must never freeze the game for good.
+      animId = requestAnimationFrame(loop);
       const rawDt = Math.min(0.05, Math.max(0.001, (now - lastTime) / 1000));
       lastTime = now;
-      const e = engineRef.current;
-      const st = gameStateRef.current;
+      try {
+        const e = engineRef.current;
+        const st = gameStateRef.current;
 
-      if (st !== 'PAUSED') e.t += rawDt;
-      if (st === 'PLAYING') update(rawDt);
-      if (gameStateRef.current !== 'PAUSED') updateFx(rawDt);
-      render();
-
-      animId = requestAnimationFrame(loop);
+        if (st !== 'PAUSED') e.t += rawDt;
+        if (st === 'PLAYING') {
+          const steps = Math.ceil(rawDt / MAX_STEP);
+          const step = rawDt / steps;
+          for (let k = 0; k < steps && gameStateRef.current === 'PLAYING'; k++) update(step);
+          // HUD sync on a clock (≈15 Hz) instead of every Nth frame, so 144 Hz screens don't re-render React 2x more
+          hudAcc += rawDt;
+          if (hudAcc >= 1 / 15) {
+            hudAcc = 0;
+            syncHud();
+          }
+        }
+        const cur = gameStateRef.current;
+        if (cur !== 'PAUSED') updateFx(rawDt);
+        // A paused frame never changes: draw it once instead of re-blurring the overlay every frame.
+        if (cur !== 'PAUSED' || needsRender || lastRenderedState !== cur) {
+          render();
+          needsRender = false;
+          lastRenderedState = cur;
+        }
+      } catch (err) {
+        console.error('[NeonBlitz] frame error', err);
+      }
     };
 
     animId = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', resize);
+      window.visualViewport?.removeEventListener('resize', resize);
+      ro?.disconnect();
     };
   }, [
     getActiveShip,
@@ -3381,6 +3448,13 @@ export const NeonGame: React.FC = () => {
   useEffect(() => {
     const onKeyDown = (evt: KeyboardEvent) => {
       engineRef.current.keys[evt.code] = true;
+      // Held keys auto-repeat: never toggle pause / dash / EMP on repeats (pause used to flicker)
+      if (evt.repeat) return;
+      // Settings sits on top of Pause: Esc closes it instead of resuming the run behind it
+      if (isSettingsOpenRef.current) {
+        if (evt.code === 'Escape') setIsSettingsOpen(false);
+        return;
+      }
       if (gameStateRef.current === 'PLAYING') {
         if (evt.code === 'Space' || evt.code === 'ShiftLeft' || evt.code === 'ShiftRight') {
           evt.preventDefault();
@@ -3399,13 +3473,26 @@ export const NeonGame: React.FC = () => {
       engineRef.current.keys[evt.code] = false;
     };
 
+    // Mouse drag is tracked on the window, so sliding over the HUD or a banner no longer drops steering
+    const onMouseMove = (evt: MouseEvent) => {
+      if (performance.now() - lastTouchRef.current < 800) return;
+      onPointerMove(evt.clientX, evt.clientY);
+    };
+    const onMouseUp = () => {
+      if (engineRef.current.touchId === -1) onPointerUp();
+    };
+
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [triggerDash, triggerEmp, togglePause]);
+  }, [triggerDash, triggerEmp, togglePause, onPointerMove, onPointerUp]);
 
   return (
     <div className="relative w-full h-full overflow-hidden select-none bg-[#050510]">
@@ -3429,9 +3516,6 @@ export const NeonGame: React.FC = () => {
           // Skip the emulated mousedown a tap fires, or it counts as a second tap and Dashes
           if (performance.now() - lastTouchRef.current > 800) onPointerDown(e.clientX, e.clientY);
         }}
-        onMouseMove={(e) => onPointerMove(e.clientX, e.clientY)}
-        onMouseUp={onPointerUp}
-        onMouseLeave={onPointerUp}
       />
 
       {(gameState === 'PLAYING' || gameState === 'PERK_SELECT') && (

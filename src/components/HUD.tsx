@@ -2,7 +2,7 @@ import React from 'react';
 import { Bomb, Check, ChevronsUp, Hourglass, Magnet, Music, Pause, Radio, Shield, Skull, Target, Timer, Volume2, VolumeX, Zap } from 'lucide-react';
 import { LevelDef, SPEAKERS, SpeakerId } from '../game/campaign';
 import { questById } from '../game/progression';
-import { tr } from '../i18n';
+import { tr, numLocale } from '../i18n';
 import { localModifier, questLabel } from '../i18n/content';
 import { DailyModifierId, DailyQuestState, GameMode, PerkId } from '../types/game';
 import { DAILY_MODIFIERS, MAX_WEAPON_LEVEL } from '../utils/constants';
@@ -78,7 +78,7 @@ const IconButton: React.FC<{ onClick: () => void; label: string; children: React
     onClick={onClick}
     aria-label={label}
     title={label}
-    className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl glass-panel flex items-center justify-center btn-cyber text-slate-200 hover:text-white"
+    className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-xl glass-panel before:absolute before:-inset-1.5 flex items-center justify-center btn-cyber text-slate-200 hover:text-white"
   >
     {children}
   </button>
@@ -149,7 +149,7 @@ export const HUD: React.FC<HUDProps> = ({
           {/* Score & Combo */}
           <div className="flex flex-col min-w-0">
             <span className="text-3xl sm:text-4xl font-black tracking-tight text-white font-cyber neon-glow-cyan tabular-nums leading-none">
-              {Math.floor(score).toLocaleString('en-US')}
+              {Math.floor(score).toLocaleString(numLocale())}
             </span>
             <div className="flex items-center gap-2 mt-1.5">
               <div className="flex flex-col">
@@ -173,7 +173,7 @@ export const HUD: React.FC<HUDProps> = ({
               </div>
               <span className="flex items-center gap-1 text-amber-300 text-xs font-bold tabular-nums">
                 <ShardIcon size={12} />
-                {shards.toLocaleString('en-US')}
+                {shards.toLocaleString(numLocale())}
               </span>
               <span className="text-slate-400 text-[11px] font-bold font-cyber tracking-wider">
                 {level
@@ -181,8 +181,8 @@ export const HUD: React.FC<HUDProps> = ({
                   : bossRush > 0
                   ? `BOSS ${bossRush}/7`
                   : gameMode === 'daily'
-                  ? `${tr('DAILY', 'NGÀY')} · LV ${waveLevel}`
-                  : `LV ${waveLevel}`}
+                  ? `${tr('DAILY', 'NGÀY')} · ${tr('LV', 'CẤP')} ${waveLevel}`
+                  : `${tr('LV', 'CẤP')} ${waveLevel}`}
               </span>
               {gameMode === 'timed' && (
                 <span
@@ -417,7 +417,7 @@ export const HUD: React.FC<HUDProps> = ({
                   />
                 </div>
                 <span className="text-[10px] font-bold text-slate-300 tabular-nums">
-                  {questClamped.toLocaleString('en-US')}/{currentQuest.target.toLocaleString('en-US')}
+                  {questClamped.toLocaleString(numLocale())}/{currentQuest.target.toLocaleString(numLocale())}
                 </span>
               </div>
               <span className="text-[10px] font-bold text-amber-300 flex items-center gap-1 mt-0.5">

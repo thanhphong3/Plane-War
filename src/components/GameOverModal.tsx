@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { CalendarDays, Crown, Flame, House, Play, RotateCcw, Skull, Star, Timer, Trophy, Waves, Wrench, Zap } from 'lucide-react';
 import { LevelDef } from '../game/campaign';
 import { ScoreSource } from '../game/engine';
-import { tr } from '../i18n';
+import { tr, numLocale } from '../i18n';
 import { masteryRewardLabel } from '../i18n/content';
 import { DailyModifierId, GameMode } from '../types/game';
 import { sound } from '../utils/audio';
@@ -198,7 +198,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   if (level) {
     return (
       <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-md anim-fade">
-        <div className="glass-panel w-full max-w-sm rounded-3xl p-5 sm:p-6 text-center flex flex-col max-h-[94vh] custom-scroll *:shrink-0 anim-pop panel-glow-pink">
+        <div className="glass-panel w-full max-w-sm rounded-3xl p-5 sm:p-6 text-center flex flex-col max-h-[94dvh] custom-scroll *:shrink-0 anim-pop panel-glow-pink">
           <p className="text-[10px] uppercase tracking-[0.3em] font-bold" style={{ color: level.accent }}>
             {level.code} • {level.name}
           </p>
@@ -214,7 +214,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           <div className="my-4 py-3 px-4 rounded-2xl bg-slate-900/85 border border-slate-800 grid grid-cols-3 gap-y-2">
             <div>
               <span className="block text-[10px] text-slate-500 uppercase tracking-wide">{tr('Score', 'Điểm')}</span>
-              <span className="text-sm font-black text-cyan-200 tabular-nums">{shown.toLocaleString('en-US')}</span>
+              <span className="text-sm font-black text-cyan-200 tabular-nums">{shown.toLocaleString(numLocale())}</span>
             </div>
             <div>
               <span className="block text-[10px] text-slate-500 uppercase tracking-wide">{tr('Shards', 'Mảnh')}</span>
@@ -300,7 +300,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
       : { label: tr('Bosses', 'Boss'), value: `${stats.bossKills}`, icon: <Skull size={13} />, color: 'text-rose-300' },
     {
       label: tr('Best', 'Kỷ lục'),
-      value: Math.max(stats.previousBest, stats.score).toLocaleString('en-US'),
+      value: Math.max(stats.previousBest, stats.score).toLocaleString(numLocale()),
       icon: <Trophy size={13} />,
       color: 'text-slate-200',
     },
@@ -308,7 +308,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-md anim-fade">
-      <div className="glass-panel w-full max-w-sm rounded-3xl p-5 sm:p-6 text-center flex flex-col max-h-[94vh] custom-scroll *:shrink-0 anim-pop panel-glow-pink">
+      <div className="glass-panel w-full max-w-sm rounded-3xl p-5 sm:p-6 text-center flex flex-col max-h-[94dvh] custom-scroll *:shrink-0 anim-pop panel-glow-pink">
         {rush?.newBestTime && (
           <div className="mx-auto mb-2 px-3.5 py-1 rounded-full bg-gradient-to-r from-emerald-300 to-cyan-400 text-slate-950 text-xs font-black uppercase font-cyber tracking-wider shadow-lg shadow-emerald-400/30 flex items-center gap-1.5">
             <Timer size={13} /> {tr('Fastest clear!', 'Phá đảo nhanh nhất!')} {formatRunTime(rush.time)}
@@ -341,7 +341,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         <div className="my-4 py-4 px-4 rounded-2xl bg-slate-900/85 border border-slate-800">
           <p className="text-[11px] uppercase tracking-widest text-slate-400 font-bold font-cyber">{tr('Score', 'Điểm')}</p>
           <p className="text-5xl font-black text-cyan-200 font-cyber neon-glow-cyan tabular-nums my-1">
-            {shown.toLocaleString('en-US')}
+            {shown.toLocaleString(numLocale())}
           </p>
           <div className="grid grid-cols-3 gap-y-3 mt-3 pt-3 border-t border-slate-800">
             {cells.map((c) => (
@@ -422,7 +422,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             </div>
             <p className="mt-1 text-[10px] text-slate-400">
               {mNext
-                ? `${tr('Next', 'Tiếp theo')}: ${masteryRewardLabel(MASTERY_REWARDS[m.level], m.level)} · ${(mNext - m.total).toLocaleString('en-US')} XP`
+                ? `${tr('Next', 'Tiếp theo')}: ${masteryRewardLabel(MASTERY_REWARDS[m.level], m.level)} · ${(mNext - m.total).toLocaleString(numLocale())} XP`
                 : tr('Fully mastered!', 'Đã thông thạo tối đa!')}
             </p>
           </div>

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Check, ChevronRight, Map as MapIcon, RotateCcw, X } from 'lucide-react';
 import { LEVELS } from '../game/campaign';
-import { tr } from '../i18n';
+import { tr, numLocale } from '../i18n';
 import { localLevel } from '../i18n/content';
 import { sound } from '../utils/audio';
 import { Stars } from './CampaignMap';
@@ -52,7 +52,7 @@ export const LevelClearModal: React.FC<LevelClearModalProps> = ({ isOpen, stats,
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-md anim-fade">
-      <div className="glass-panel w-full max-w-sm rounded-3xl p-5 sm:p-6 text-center flex flex-col anim-pop panel-glow-amber">
+      <div className="glass-panel w-full max-w-sm rounded-3xl p-5 sm:p-6 text-center flex flex-col max-h-[calc(100dvh-1.5rem)] custom-scroll *:shrink-0 anim-pop panel-glow-amber">
         <p className="text-[10px] uppercase tracking-[0.3em] font-bold" style={{ color: level.accent }}>
           {level.code} • {level.name}
         </p>
@@ -90,7 +90,7 @@ export const LevelClearModal: React.FC<LevelClearModalProps> = ({ isOpen, stats,
         <div className="grid grid-cols-2 gap-2 mt-3">
           <div className="rounded-2xl bg-slate-900/80 border border-slate-800 py-2">
             <span className="block text-[10px] text-slate-500 uppercase tracking-wide">{tr('Score', 'Điểm')}</span>
-            <span className="text-base font-black text-cyan-200 tabular-nums">{stats.score.toLocaleString('en-US')}</span>
+            <span className="text-base font-black text-cyan-200 tabular-nums">{stats.score.toLocaleString(numLocale())}</span>
           </div>
           <div className="rounded-2xl bg-slate-900/80 border border-slate-800 py-2">
             <span className="block text-[10px] text-slate-500 uppercase tracking-wide">{tr('Shards', 'Mảnh')}</span>

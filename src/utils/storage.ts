@@ -3,11 +3,44 @@ import { DEFAULT_SETTINGS, INITIAL_SAVE, STORAGE_KEY } from './constants';
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
-export function loadGameSave(): SaveData {
+const isArr3 = (v: unknown) => Array.isArray(v) && v.length === 3;
+
+/** First-run defaults that follow the OS "reduce motion" accessibility setting. */
+function freshSettings() {
+  let reduce = false;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...INITIAL_SAVE };
+    reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  } catch {
+    reduce = false;
+  }
+  return reduce ? { ...DEFAULT_SETTINGS, shake: 0, reduceFlash: true } : { ...DEFAULT_SETTINGS };
+}
+
+const freshSave = (): SaveData => ({ ...INITIAL_SAVE, settings: freshSettings() });
+
+/** Keeps an unreadable save aside instead of silently overwriting the player's progress. */
+function backupCorrupt(raw: string) {
+  try {
+    localStorage.setItem(`${STORAGE_KEY}.bak-${Date.now()}`, raw);
+  } catch {
+    // storage full / blocked: nothing more we can do
+  }
+}
+
+export function loadGameSave(): SaveData {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return freshSave();
+  }
+  if (!raw) return freshSave();
+  try {
     const parsed = JSON.parse(raw);
+    if (!isObj(parsed as unknown)) {
+      backupCorrupt(raw);
+      return freshSave();
+    }
     return {
       ...INITIAL_SAVE,
       ...parsed,
@@ -26,8 +59,11 @@ export function loadGameSave(): SaveData {
       bestBossRush: typeof parsed.bestBossRush === 'number' ? parsed.bestBossRush : 0,
       bestBossRushTime: typeof parsed.bestBossRushTime === 'number' ? parsed.bestBossRushTime : 0,
       dailyQuests:
-        isObj(parsed.dailyQuests) && Array.isArray(parsed.dailyQuests.ids)
-          ? parsed.dailyQuests
+        isObj(parsed.dailyQuests) &&
+        isArr3(parsed.dailyQuests.ids) &&
+        isArr3(parsed.dailyQuests.progress) &&
+        isArr3(parsed.dailyQuests.done)
+          ? (parsed.dailyQuests as unknown as SaveData['dailyQuests'])
           : INITIAL_SAVE.dailyQuests,
       daily: { ...INITIAL_SAVE.daily, ...(isObj(parsed.daily) ? parsed.daily : {}) },
       shipXp: isObj(parsed.shipXp) ? parsed.shipXp : {},
@@ -37,7 +73,8 @@ export function loadGameSave(): SaveData {
       totalRevives: typeof parsed.totalRevives === 'number' ? parsed.totalRevives : 0,
     };
   } catch {
-    return { ...INITIAL_SAVE };
+    backupCorrupt(raw);
+    return freshSave();
   }
 }
 

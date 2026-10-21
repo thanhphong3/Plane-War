@@ -50,3 +50,6 @@ export const tr = (en: string, vi: string) => (lang === 'vi' ? vi : en);
 
 /** Canvas font stack. Orbitron has no Vietnamese glyphs, so swap to Exo 2 in VI. */
 export const canvasFont = () => (lang === 'vi' ? "'Exo 2', sans-serif" : "'Orbitron', sans-serif");
+
+/** Number formatting locale: 1,234 in English, 1.234 in Vietnamese. */
+export const numLocale = () => (lang === 'vi' ? 'vi-VN' : 'en-US');

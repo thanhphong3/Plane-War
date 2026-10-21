@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Check, Lock, Star, X } from 'lucide-react';
 import { SaveData, ShipDef } from '../types/game';
-import { tr } from '../i18n';
+import { tr, numLocale } from '../i18n';
 import { localShip, localUpgrade, masteryRewardLabel, skinName } from '../i18n/content';
 import {
   MASTERY_REWARDS,
@@ -17,6 +17,7 @@ import {
 import { sound } from '../utils/audio';
 import { Icon, ShardIcon } from './Icon';
 import { ShipPreview } from './ShipPreview';
+import { useEscape } from '../hooks/useEscape';
 
 interface ShopModalProps {
   isOpen: boolean;
@@ -38,6 +39,7 @@ function shipStats(ship: ShipDef) {
 
 export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData, onUpdateSave, onShowToast }) => {
   const [tab, setTab] = useState<'ships' | 'upgrades'>('ships');
+  useEscape(isOpen, onClose);
   if (!isOpen) return null;
 
   const handleSelectOrBuyShip = (ship: ShipDef) => {
@@ -57,7 +59,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
       onShowToast(tr(`Unlocked: ${ship.name}!`, `Đã mở khóa: ${ship.name}!`));
     } else {
       sound.playSound('click');
-      const missing = (ship.cost - saveData.shards).toLocaleString('en-US');
+      const missing = (ship.cost - saveData.shards).toLocaleString(numLocale());
       onShowToast(tr(`Need ${missing} more shards`, `Cần thêm ${missing} mảnh`));
     }
   };
@@ -86,14 +88,14 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
       onShowToast(tr(`${def.name} upgraded to Lv.${currentLevel + 1}!`, `${def.name} đã lên Lv.${currentLevel + 1}!`));
     } else {
       sound.playSound('click');
-      const missing = (cost - saveData.shards).toLocaleString('en-US');
+      const missing = (cost - saveData.shards).toLocaleString(numLocale());
       onShowToast(tr(`Need ${missing} more shards`, `Cần thêm ${missing} mảnh`));
     }
   };
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-md anim-fade">
-      <div className="glass-panel w-full max-w-lg rounded-3xl p-4 sm:p-6 flex flex-col max-h-[94vh] anim-pop panel-glow">
+      <div className="glass-panel w-full max-w-lg rounded-3xl p-4 sm:p-6 flex flex-col max-h-[94dvh] anim-pop panel-glow">
         {/* Header */}
         <div className="flex items-center justify-between pb-3">
           <div>
@@ -105,7 +107,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-200 text-sm font-black">
               <ShardIcon size={14} />
-              <span className="tabular-nums">{saveData.shards.toLocaleString('en-US')}</span>
+              <span className="tabular-nums">{saveData.shards.toLocaleString(numLocale())}</span>
             </div>
             <button
               type="button"
@@ -210,7 +212,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
                         </span>
                         <span className="text-slate-400 tabular-nums">
                           {mNext
-                            ? `${(xp - mFloor).toLocaleString('en-US')}/${(mNext - mFloor).toLocaleString('en-US')} XP`
+                            ? `${(xp - mFloor).toLocaleString(numLocale())}/${(mNext - mFloor).toLocaleString(numLocale())} XP`
                             : tr('Maxed', 'Tối đa')}
                         </span>
                       </div>
@@ -276,7 +278,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
                       tr('Equip', 'Trang bị')
                     ) : (
                       <>
-                        {tr('Unlock for', 'Mở khóa với')} <Icon name="gem" size={12} /> {ship.cost.toLocaleString('en-US')}
+                        {tr('Unlock for', 'Mở khóa với')} <Icon name="gem" size={12} /> {ship.cost.toLocaleString(numLocale())}
                       </>
                     )}
                   </button>
@@ -332,10 +334,10 @@ export const ShopModal: React.FC<ShopModalProps> = ({ isOpen, onClose, saveData,
                     }`}
                   >
                     {isMax ? (
-                      'MAX'
+                      tr('MAX', 'TỐI ĐA')
                     ) : (
                       <>
-                        <Icon name="gem" size={12} /> {cost.toLocaleString('en-US')}
+                        <Icon name="gem" size={12} /> {cost.toLocaleString(numLocale())}
                       </>
                     )}
                   </button>

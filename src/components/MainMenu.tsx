@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { LEVELS } from '../game/campaign';
 import { currentDaily, currentDailyQuests, dailyModifiers, msUntilTomorrow, prevDayKey, questById } from '../game/progression';
-import { setLang, tr, useLang } from '../i18n';
+import { setLang, tr, useLang, numLocale } from '../i18n';
 import { localLevel, localModifier, localShip, questLabel } from '../i18n/content';
 import { GameMode, SaveData, ShipDef } from '../types/game';
 import {
@@ -133,12 +133,12 @@ export const MainMenu: React.FC<MainMenuProps> = ({
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-5 bg-slate-950/55 backdrop-blur-[3px]">
-      <div className="glass-panel w-full max-w-md rounded-3xl p-5 sm:p-6 flex flex-col max-h-[94vh] custom-scroll *:shrink-0 anim-pop panel-glow">
+      <div className="glass-panel w-full max-w-md rounded-3xl p-5 sm:p-6 flex flex-col max-h-[94dvh] custom-scroll *:shrink-0 anim-pop panel-glow">
         {/* Header Bar */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/40 text-amber-200 text-sm font-bold">
             <ShardIcon size={14} />
-            <span className="tabular-nums">{saveData.shards.toLocaleString('en-US')}</span>
+            <span className="tabular-nums">{saveData.shards.toLocaleString(numLocale())}</span>
           </div>
           <div className="flex items-center gap-1.5">
             <button
@@ -315,7 +315,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
             <span>
               {tr('Today’s best', 'Kỷ lục hôm nay')}{' '}
-              <span className="font-bold text-slate-100 tabular-nums">{daily.best.toLocaleString('en-US')}</span>
+              <span className="font-bold text-slate-100 tabular-nums">{daily.best.toLocaleString(numLocale())}</span>
             </span>
             <span>
               {daily.rewarded
@@ -361,7 +361,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
                     {questLabel(q)}
                   </span>
                   <span className="text-[10px] tabular-nums text-slate-400">
-                    {done ? '' : `${prog.toLocaleString('en-US')}/${q.target.toLocaleString('en-US')} · `}
+                    {done ? '' : `${prog.toLocaleString(numLocale())}/${q.target.toLocaleString(numLocale())} · `}
                     <span className="text-amber-300 font-bold">+{q.reward}</span>
                   </span>
                 </div>
@@ -396,7 +396,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
                   <span className={`text-[10px] ${active ? accent.text : 'text-slate-500'}`}>{m.tag()}</span>
                   <span className="mt-1 text-[10px] text-slate-400 flex items-center gap-1">
                     <Trophy size={10} />
-                    <span className="tabular-nums font-bold text-slate-200">{m.best(saveData).toLocaleString('en-US')}</span>
+                    <span className="tabular-nums font-bold text-slate-200">{m.best(saveData).toLocaleString(numLocale())}</span>
                   </span>
                   {m.extra?.(saveData) && (
                     <span className="text-[10px] text-slate-400 flex items-center gap-1">

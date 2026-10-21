@@ -30,7 +30,7 @@ export const PauseModal: React.FC<PauseModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md anim-fade">
-      <div className="glass-panel w-full max-w-xs rounded-3xl p-6 text-center space-y-4 anim-pop panel-glow">
+      <div className="glass-panel w-full max-w-xs rounded-3xl p-6 text-center space-y-4 max-h-[calc(100dvh-2rem)] custom-scroll *:shrink-0 anim-pop panel-glow">
         <div className="w-14 h-14 mx-auto rounded-2xl bg-cyan-500/15 border border-cyan-400/40 text-cyan-300 flex items-center justify-center">
           <Pause size={26} />
         </div>

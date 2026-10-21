@@ -85,7 +85,7 @@ export const PerkModal: React.FC<PerkModalProps> = ({ isOpen, options, owned, le
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-sm anim-fade">
-      <div className="w-full max-w-3xl flex flex-col items-center">
+      <div className="w-full max-w-3xl flex flex-col items-center max-h-[calc(100dvh-1.5rem)] custom-scroll *:shrink-0">
         <p className="text-[10px] sm:text-[11px] uppercase tracking-[0.35em] text-fuchsia-300 font-bold font-cyber">{subtitle}</p>
         <h2 className="text-2xl sm:text-4xl font-black text-white font-cyber uppercase tracking-wider neon-glow-cyan mt-1 text-center">
           {tr('Tactical Upgrade', 'Nâng Cấp Chiến Thuật')}

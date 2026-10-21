@@ -93,6 +93,25 @@ class SoundManager {
   private sfxVolume = 0.9;
   private musicVolume = 0.8;
   private haptics = true;
+  /** True while the page is hidden and we suspended the context on purpose. */
+  private hiddenSuspend = false;
+
+  public isRunning() {
+    return !!this.ctx && this.ctx.state === 'running';
+  }
+
+  /** Silences everything while the tab / app is in the background (saves battery, no stutter). */
+  public setPageHidden(hidden: boolean) {
+    this.hiddenSuspend = hidden;
+    if (!this.ctx) return;
+    if (hidden) {
+      this.ctx.suspend().catch(() => {});
+    } else {
+      this.ctx.resume().catch(() => {});
+      // Skip the notes that would have played while hidden
+      this.nextStepTime = this.ctx.currentTime + 0.05;
+    }
+  }
 
   private wantBgm = false;
   private schedulerId: number | null = null;
@@ -179,8 +198,10 @@ class SoundManager {
         this.ctx = ctx;
         this.applyBgmGain();
       }
-      if (this.ctx.state === 'suspended') {
-        this.ctx.resume();
+      // iOS reports 'interrupted' after a call / app switch: resume from any non-running state
+      // (unless we parked it ourselves because the page is hidden)
+      if (this.ctx.state !== 'running' && this.ctx.state !== 'closed' && !this.hiddenSuspend) {
+        this.ctx.resume().catch(() => {});
       }
     } catch {
       return null;
@@ -224,6 +245,7 @@ class SoundManager {
     if (!this.noise) return;
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
+    src.loop = true; // bursts longer than the 1 s buffer (boss_down, gameover) used to cut off with a click
     const filter = ctx.createBiquadFilter();
     filter.type = filterType;
     filter.frequency.setValueAtTime(freq, t);

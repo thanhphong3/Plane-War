@@ -8,6 +8,10 @@ export default defineConfig(() => {
     // Relative asset paths so the build also works from a sub-path (GitHub Pages: /Plane-War/)
     base: './',
     plugins: [react(), tailwindcss()],
+    build: {
+      // ~160 kB gzipped total (≈60% is react-dom): fine for a game, so don't warn on every build
+      chunkSizeWarningLimit: 650,
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

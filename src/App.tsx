@@ -7,7 +7,7 @@ import { NeonGame } from './components/NeonGame';
 
 export default function App() {
   return (
-    <main className="w-screen h-screen overflow-hidden bg-[#050510]">
+    <main className="w-screen h-dvh overflow-hidden bg-[#050510]">
       <NeonGame />
     </main>
   );

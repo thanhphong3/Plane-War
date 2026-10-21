@@ -5,6 +5,7 @@ import { tr } from '../i18n';
 import { localLevel } from '../i18n/content';
 import { SaveData } from '../types/game';
 import { sound } from '../utils/audio';
+import { useEscape } from '../hooks/useEscape';
 
 interface CampaignMapProps {
   isOpen: boolean;
@@ -27,12 +28,13 @@ export const Stars: React.FC<{ count: number; size?: number }> = ({ count, size 
 );
 
 export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onClose, onSelectLevel }) => {
+  useEscape(isOpen, onClose);
   if (!isOpen) return null;
   const keys = LEVELS.slice(0, 5).filter((l) => (saveData.campaignStars[l.id] || 0) > 0).length;
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-md anim-fade">
-      <div className="glass-panel w-full max-w-md rounded-3xl p-4 sm:p-6 flex flex-col max-h-[94vh] anim-pop panel-glow-pink">
+      <div className="glass-panel w-full max-w-md rounded-3xl p-4 sm:p-6 flex flex-col max-h-[94dvh] anim-pop panel-glow-pink">
         <div className="flex items-start justify-between pb-3">
           <div>
             <p className="text-[10px] uppercase tracking-[0.3em] text-rose-300 font-bold font-cyber">{tr('Campaign', 'Chiến dịch')}</p>

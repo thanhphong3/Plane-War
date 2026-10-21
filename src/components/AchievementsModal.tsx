@@ -6,6 +6,7 @@ import { localAchievement } from '../i18n/content';
 import { ACHIEVEMENTS } from '../utils/constants';
 import { sound } from '../utils/audio';
 import { Icon, ShardIcon } from './Icon';
+import { useEscape } from '../hooks/useEscape';
 
 interface AchievementsModalProps {
   isOpen: boolean;
@@ -20,13 +21,14 @@ export const AchievementsModal: React.FC<AchievementsModalProps> = ({
   saveData,
   onClaimAchievement,
 }) => {
+  useEscape(isOpen, onClose);
   if (!isOpen) return null;
 
   const claimed = ACHIEVEMENTS.filter((a) => saveData.unlockedAchievements.includes(a.id)).length;
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-md anim-fade">
-      <div className="glass-panel w-full max-w-md rounded-3xl p-4 sm:p-6 flex flex-col max-h-[92vh] anim-pop panel-glow-amber">
+      <div className="glass-panel w-full max-w-md rounded-3xl p-4 sm:p-6 flex flex-col max-h-[92dvh] anim-pop panel-glow-amber">
         {/* Header */}
         <div className="flex items-center justify-between pb-3">
           <div>

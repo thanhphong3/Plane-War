@@ -11,6 +11,7 @@ import {
   drawFog,
   drawGem,
   drawGlow,
+  fxPrefs,
   drawHazard,
   drawLaser,
   drawLightning,
@@ -43,7 +44,8 @@ function endlessTheme(e: EngineState): LevelTheme | undefined {
   if (e.biomeTo < 0) return undefined;
   const a = biomeTheme(e.biomeFrom);
   const b = biomeTheme(e.biomeTo);
-  const k = Math.max(0, Math.min(1, e.biomeBlend));
+  // Quantised to 24 steps: smooth to the eye, and only a handful of distinct colours hit the glow cache
+  const k = Math.round(Math.max(0, Math.min(1, e.biomeBlend)) * 24) / 24;
   if (k >= 1) return b;
   return {
     top: mixHex(a.top, b.top, k),
@@ -168,7 +170,7 @@ export function renderScene(
     const blinking = p.invulnTimer > 0 && p.dashTimer <= 0 && !e.isFeverActive;
     ctx.save();
     ctx.translate(p.x, p.y);
-    if (blinking && Math.sin(t * 40) < 0) ctx.globalAlpha = 0.35;
+    if (blinking) ctx.globalAlpha = fxPrefs.reduceFlash ? 0.6 : Math.sin(t * 40) < 0 ? 0.35 : 1;
 
     // Combo halo on the floor under the ship: violet at x10, gold and spinning at x20
     if (e.combo >= 10 && !e.isFeverActive) {

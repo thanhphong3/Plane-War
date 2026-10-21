@@ -1,0 +1,14 @@
+{
+  "name": "NEON BLITZ: Hyper Speed",
+  "short_name": "Neon Blitz",
+  "description": "Hyper-speed neon starship reflex game.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#050510",
+  "theme_color": "#050510",
+  "icons": [
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
