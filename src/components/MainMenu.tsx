@@ -8,6 +8,7 @@ import {
   CircleHelp,
   Crown,
   Flame,
+  GraduationCap,
   Hand,
   InfinityIcon,
   Keyboard,
@@ -35,6 +36,7 @@ import {
   DAILY_MODIFIERS,
   DAILY_QUEST_BONUS,
   SHIPS,
+  TUTORIAL_REWARD,
   UPGRADES,
   dailyBonus,
   hasClaimableAchievement,
@@ -53,6 +55,7 @@ interface MainMenuProps {
   onSelectMode: (mode: GameMode) => void;
   onStartGame: () => void;
   onStartDaily: () => void;
+  onStartTutorial: () => void;
   onOpenSettings: () => void;
   onOpenCampaign: () => void;
   onOpenShop: () => void;
@@ -108,7 +111,7 @@ const HeaderButton: React.FC<{ onClick: () => void; label: string; children: Rea
 );
 
 /** Controls and the visual grammar, tucked behind the "?" button so the menu stays clean. */
-const HowToPlay: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+const HowToPlay: React.FC<{ onClose: () => void; onStartTutorial: () => void }> = ({ onClose, onStartTutorial }) => {
   const lang = useLang();
   useEscape(true, onClose);
   return (
@@ -196,6 +199,18 @@ const HowToPlay: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             </span>
           </div>
 
+          <button
+            type="button"
+            onClick={() => {
+              sound.playSound('click');
+              onClose();
+              onStartTutorial();
+            }}
+            className="w-full py-2.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-400/60 text-cyan-100 font-bold text-xs flex items-center justify-center gap-1.5 btn-cyber font-cyber"
+          >
+            <GraduationCap size={14} /> {tr('Play Flight Training', 'Vào Huấn Luyện Bay')}
+          </button>
+
           <div className="hidden sm:flex items-start gap-2.5 text-slate-400 text-xs">
             <span className="how-icon bg-slate-700/40 text-slate-300">
               <Keyboard size={13} />
@@ -219,6 +234,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   onSelectMode,
   onStartGame,
   onStartDaily,
+  onStartTutorial,
   onOpenSettings,
   onOpenCampaign,
   onOpenShop,
@@ -292,6 +308,33 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <span className="text-fuchsia-400">•</span> {tr('Overdrive', 'Quá Tải')}
           </p>
         </div>
+
+        {/* New pilots: Flight Training first (it stays in How to Play afterwards) */}
+        {!saveData.tutorialDone && (
+          <button
+            type="button"
+            onClick={() => {
+              sound.playSound('click');
+              onStartTutorial();
+            }}
+            className="flex items-center gap-3 p-3 rounded-2xl border border-cyan-400/60 bg-cyan-500/10 hover:border-cyan-300 btn-cyber text-left animate-glow"
+          >
+            <span className="shrink-0 w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center text-cyan-200">
+              <GraduationCap size={20} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-black text-white font-cyber leading-tight">
+                {saveData.totalRuns === 0 ? tr('New pilot? Start here', 'Phi công mới? Bắt đầu ở đây') : tr('Flight Training', 'Huấn luyện bay')}
+              </span>
+              <span className="block text-[11px] text-slate-300 leading-tight mt-0.5">
+                {tr('7 quick lessons · about 2 minutes', '7 bài ngắn · khoảng 2 phút')}
+              </span>
+            </span>
+            <span className="flex items-center gap-1 text-xs font-black text-amber-300 shrink-0">
+              +{TUTORIAL_REWARD} <ShardIcon size={12} />
+            </span>
+          </button>
+        )}
 
         {/* Ship: tap to open the Hangar */}
         <button
@@ -497,7 +540,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
         )}
       </div>
 
-      {showHelp && <HowToPlay onClose={() => setShowHelp(false)} />}
+      {showHelp && <HowToPlay onClose={() => setShowHelp(false)} onStartTutorial={onStartTutorial} />}
     </div>
   );
 };

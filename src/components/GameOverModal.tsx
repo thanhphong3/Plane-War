@@ -1,13 +1,31 @@
 import React, { useEffect, useState } from 'react';
-import { CalendarDays, Crown, Flame, House, Play, RotateCcw, Skull, Star, Timer, Trophy, Waves, Wrench, Zap } from 'lucide-react';
+import {
+  CalendarDays,
+  Check,
+  ChevronDown,
+  Crown,
+  Flame,
+  House,
+  Play,
+  RotateCcw,
+  Share2,
+  Skull,
+  Star,
+  Timer,
+  Trophy,
+  Waves,
+  Wrench,
+  Zap,
+} from 'lucide-react';
 import { ACTS, LevelDef, actIndexOf, isActFinale } from '../game/campaign';
 import { ScoreSource } from '../game/engine';
 import { tr, numLocale } from '../i18n';
-import { masteryRewardLabel } from '../i18n/content';
-import { DailyModifierId, GameMode } from '../types/game';
+import { localModifier, masteryRewardLabel } from '../i18n/content';
+import { DailyModifierId, GameMode, PerkId } from '../types/game';
 import { sound } from '../utils/audio';
-import { MASTERY_REWARDS, MASTERY_XP, MAX_MASTERY } from '../utils/constants';
+import { DAILY_MODIFIERS, MASTERY_REWARDS, MASTERY_XP, MAX_MASTERY } from '../utils/constants';
 import { ShardIcon } from './Icon';
+import { PerkIcon, perkDef } from './PerkModal';
 
 export interface GameOverStats {
   score: number;
@@ -43,9 +61,27 @@ export interface GameOverStats {
     level: number;
   } | null;
   /** Daily Challenge results, null in other modes. */
-  daily: { bonus: number; streak: number; modifiers: DailyModifierId[] } | null;
+  daily: { bonus: number; streak: number; modifiers: DailyModifierId[]; date: string } | null;
   /** A revive was spent this run. */
   revived: boolean;
+  /** How the run went, for the Run Report panel. */
+  report: RunReport | null;
+}
+
+export interface RunReport {
+  /** What dealt the killing blow ('' if the run didn't end in a crash). */
+  killedBy: string;
+  /** Score sampled every `interval` seconds, ending with the final score. */
+  timeline: number[];
+  interval: number;
+  /** Run length in seconds. */
+  duration: number;
+  /** Run time of each boss kill. */
+  bossKillTimes: number[];
+  kills: number;
+  parries: number;
+  grazes: number;
+  perks: { id: PerkId; level: number }[];
 }
 
 /** Score breakdown legend: label, colour and a coaching line for when that source is weakest. */
@@ -114,7 +150,79 @@ const modeName = (mode: GameMode) =>
     campaign: tr('Campaign', 'Chiến dịch'),
     bossrush: tr('Boss Rush', 'Boss Rush'),
     daily: tr('Daily Challenge', 'Thử Thách Ngày'),
+    tutorial: tr('Flight Training', 'Huấn luyện bay'),
   })[mode];
+
+/** Plain-text brag for the share sheet / clipboard. Daily runs name the date and rules so friends can compare. */
+const shareText = (stats: GameOverStats, mode: GameMode) => {
+  const loc = numLocale();
+  const head = stats.daily
+    ? `NEON BLITZ · ${modeName(mode)} ${stats.daily.date}`
+    : `NEON BLITZ · ${modeName(mode)}`;
+  const rules = stats.daily
+    ? stats.daily.modifiers.map((id) => localModifier(DAILY_MODIFIERS.find((m) => m.id === id) || DAILY_MODIFIERS[0]).name).join(' + ')
+    : '';
+  const line = stats.bossRush
+    ? tr(
+        `${stats.score.toLocaleString(loc)} pts · ${stats.bossRush.cleared}/${stats.bossRush.total} bosses · ${formatRunTime(stats.bossRush.time)}`,
+        `${stats.score.toLocaleString(loc)} điểm · ${stats.bossRush.cleared}/${stats.bossRush.total} boss · ${formatRunTime(stats.bossRush.time)}`
+      )
+    : tr(
+        `${stats.score.toLocaleString(loc)} pts · Level ${stats.wave} · x${stats.maxCombo} combo`,
+        `${stats.score.toLocaleString(loc)} điểm · Cấp ${stats.wave} · combo x${stats.maxCombo}`
+      );
+  return [head, rules, line, tr('Can you beat it?', 'Bạn vượt qua được không?')].filter(Boolean).join('\n');
+};
+
+/** Native share sheet where there is one, otherwise the clipboard. Resolves to what happened. */
+async function shareRun(stats: GameOverStats, mode: GameMode): Promise<'shared' | 'copied' | 'failed'> {
+  const text = shareText(stats, mode);
+  const url = window.location.href.split('#')[0];
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: 'Neon Blitz', text, url });
+      return 'shared';
+    }
+  } catch (err) {
+    // The player closed the sheet: not an error worth a fallback
+    if ((err as DOMException)?.name === 'AbortError') return 'failed';
+  }
+  try {
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    return 'copied';
+  } catch {
+    return 'failed';
+  }
+}
+
+/** Score-over-time sparkline with a marker at each boss kill. */
+const RunGraph: React.FC<{ report: RunReport }> = ({ report }) => {
+  const W = 300;
+  const H = 64;
+  const pts = report.timeline;
+  const max = Math.max(1, ...pts);
+  const span = Math.max(report.duration, report.interval);
+  // Every sample sits on its own time, the last one (final score) at the very end of the run
+  const xAt = (i: number) => (i === pts.length - 1 ? W : Math.min(W, ((i * report.interval) / span) * W));
+  const yAt = (v: number) => H - 3 - (v / max) * (H - 8);
+  const line = pts.map((v, i) => `${i ? 'L' : 'M'}${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-16" preserveAspectRatio="none" role="img" aria-label={tr('Score over time', 'Điểm theo thời gian')}>
+      <defs>
+        <linearGradient id="runFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#22d3ee" stopOpacity="0.35" />
+          <stop offset="1" stopColor="#22d3ee" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {report.bossKillTimes.map((t, i) => {
+        const x = Math.min(W, (t / span) * W);
+        return <line key={i} x1={x} x2={x} y1={0} y2={H} stroke="#fb7185" strokeWidth="1.5" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />;
+      })}
+      {pts.length > 1 && <path d={`${line} L${W},${H} L0,${H} Z`} fill="url(#runFill)" />}
+      {pts.length > 1 && <path d={line} fill="none" stroke="#67e8f9" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />}
+    </svg>
+  );
+};
 
 const TIPS: [en: string, vi: string][] = [
   [
@@ -157,6 +265,18 @@ const TIPS: [en: string, vi: string][] = [
     'Picking a perk you already own levels it up, up to Lv 3.',
     'Chọn lại perk đã có sẽ nâng cấp nó, tối đa cấp 3.',
   ],
+  [
+    'Own both halves of a pair (e.g. Holo Echo + Static Aftershock) and an Evolution shows up in the next picker.',
+    'Có đủ một cặp perk (vd. Bóng Ảnh Holo + Dư Chấn Tĩnh Điện) thì lần chọn sau sẽ có thẻ Tiến Hóa.',
+  ],
+  [
+    'Kill the green Mender first: while its beams are on, the enemies it links shrug off your bullets.',
+    'Hạ Hộ Pháp màu xanh trước: khi tia của nó còn nối, kẻ địch được bảo vệ sẽ miễn nhiễm đạn.',
+  ],
+  [
+    'A Bulwark only blocks shots from below. Dash through it, or let splash and lightning do the work.',
+    'Thành Lũy chỉ chặn đạn từ phía dưới. Lướt xuyên qua, hoặc dùng sát thương lan và tia sét.',
+  ],
 ];
 
 /** Score counter that ticks up when the modal opens. */
@@ -189,6 +309,11 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   onMainMenu,
 }) => {
   const shown = useCountUp(stats.score, isOpen);
+  const [showReport, setShowReport] = useState(false);
+  const [shareState, setShareState] = useState<'idle' | 'shared' | 'copied' | 'failed'>('idle');
+  useEffect(() => {
+    if (isOpen) setShareState('idle');
+  }, [isOpen]);
   if (!isOpen) return null;
   const tip =
     level && stats.reachedBoss
@@ -333,6 +458,11 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             ? tr("Time's Up!", 'Hết giờ!')
             : tr('Ship Destroyed', 'Tàu bị phá hủy')}
         </h2>
+        {stats.report?.killedBy && (
+          <p className="text-xs text-slate-400 mt-1">
+            {tr('Taken down by', 'Bị hạ bởi')} <span className="font-bold text-rose-300">{stats.report.killedBy}</span>
+          </p>
+        )}
         {rush && (
           <p className="text-xs text-slate-400 mt-1">
             {stats.reason === 'victory'
@@ -388,6 +518,68 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
                 </span>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Run Report: how the run unfolded */}
+        {stats.report && (
+          <div className="mb-3 rounded-xl bg-slate-900/80 border border-slate-800 text-left">
+            <button
+              type="button"
+              onClick={() => {
+                sound.playSound('click');
+                setShowReport((v) => !v);
+              }}
+              aria-expanded={showReport}
+              className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-bold text-slate-200 font-cyber uppercase tracking-wider"
+            >
+              {tr('Run Report', 'Báo cáo trận đấu')}
+              <ChevronDown size={14} className={`text-slate-500 transition-transform ${showReport ? 'rotate-180' : ''}`} />
+            </button>
+            {showReport && (
+              <div className="px-3 pb-3 anim-drop">
+                <RunGraph report={stats.report} />
+                <div className="flex justify-between text-[9px] text-slate-500 tabular-nums -mt-0.5">
+                  <span>0:00</span>
+                  {stats.report.bossKillTimes.length > 0 && (
+                    <span className="text-rose-300">┆ {tr('boss down', 'hạ boss')}</span>
+                  )}
+                  <span>{formatRunTime(stats.report.duration)}</span>
+                </div>
+                <div className="mt-2 grid grid-cols-4 gap-1 text-center">
+                  {[
+                    { label: tr('Time', 'Thời gian'), value: formatRunTime(stats.report.duration) },
+                    { label: tr('Kills', 'Hạ địch'), value: stats.report.kills.toLocaleString(numLocale()) },
+                    { label: tr('Grazes', 'Sượt'), value: stats.report.grazes.toLocaleString(numLocale()) },
+                    { label: tr('Parries', 'Phản đòn'), value: `${stats.report.parries}` },
+                  ].map((c) => (
+                    <div key={c.label} className="rounded-lg bg-slate-950/60 py-1">
+                      <span className="block text-[9px] text-slate-500 uppercase tracking-wide">{c.label}</span>
+                      <span className="text-xs font-black text-slate-100 tabular-nums">{c.value}</span>
+                    </div>
+                  ))}
+                </div>
+                {stats.report.perks.length > 0 && (
+                  <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">{tr('Perks', 'Nâng cấp')}</span>
+                    {stats.report.perks.map(({ id, level }) => {
+                      const def = perkDef(id);
+                      return (
+                        <span
+                          key={id}
+                          className="flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-bold"
+                          style={{ color: def.color, borderColor: `${def.color}66`, backgroundColor: `${def.color}14` }}
+                        >
+                          <PerkIcon id={id} size={11} />
+                          {def.name}
+                          {level > 1 && <span className="text-amber-300">{level}</span>}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -448,7 +640,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           >
             <Play size={18} fill="currentColor" /> {tr('Play Again', 'Chơi lại')}
           </button>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
               onClick={() => {
@@ -458,6 +650,24 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
               className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-amber-200 font-bold text-xs flex items-center justify-center gap-1.5 btn-cyber font-cyber"
             >
               <Wrench size={14} /> {tr('Hangar', 'Xưởng tàu')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                sound.playSound('click');
+                shareRun(stats, gameMode).then(setShareState);
+              }}
+              className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-cyan-200 font-bold text-xs flex items-center justify-center gap-1.5 btn-cyber font-cyber"
+            >
+              {shareState === 'copied' ? (
+                <>
+                  <Check size={14} /> {tr('Copied', 'Đã chép')}
+                </>
+              ) : (
+                <>
+                  <Share2 size={14} /> {tr('Share', 'Chia sẻ')}
+                </>
+              )}
             </button>
             <button
               type="button"

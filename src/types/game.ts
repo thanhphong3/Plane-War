@@ -1,4 +1,4 @@
-export type GameMode = 'endless' | 'timed' | 'hardcore' | 'campaign' | 'bossrush' | 'daily';
+export type GameMode = 'endless' | 'timed' | 'hardcore' | 'campaign' | 'bossrush' | 'daily' | 'tutorial';
 export type GameState = 'MENU' | 'PLAYING' | 'PAUSED' | 'GAMEOVER' | 'STORY' | 'LEVELCLEAR' | 'PERK_SELECT' | 'REVIVE';
 
 /** Mid-run Tactical Perks (Endless / Hardcore / Boss Rush / Daily). */
@@ -18,7 +18,12 @@ export type PerkId =
   // One-shot rewards offered once every perk is maxed out
   | 'reward_shield'
   | 'reward_power'
-  | 'reward_emp';
+  | 'reward_emp'
+  // Evolutions: unlocked by owning both of their parent perks
+  | 'tempest_echo'
+  | 'seeker_prism'
+  | 'event_horizon'
+  | 'redline';
 
 export interface PerkDef {
   id: PerkId;
@@ -33,6 +38,8 @@ export interface PerkDef {
   gambit?: boolean;
   /** Instant pickup instead of a lasting perk. */
   reward?: boolean;
+  /** Evolution: offered once both parent perks are installed. */
+  evolves?: [PerkId, PerkId];
 }
 
 /** Daily Challenge rule twists. */
@@ -225,6 +232,8 @@ export interface SaveData {
   totalElites: number;
   /** Times a run was continued with a revive. */
   totalRevives: number;
+  /** Flight Training finished (its one-time reward was paid). */
+  tutorialDone: boolean;
 }
 
 export interface HazardEntity {
@@ -233,8 +242,23 @@ export interface HazardEntity {
    * 'orb' is a heavy plasma core that can be deflected with a Dash.
    * 'splitter' bursts into two drones when shot, 'sniper' telegraphs a fast aimed shot,
    * 'kamikaze' locks on and lunges in a straight line.
+   * 'shielder' carries a front shield that blocks shots from below, 'mender' wards nearby enemies,
+   * 'bomber' crosses the screen dropping 'mine's that burst into a ring of bullets.
    */
-  type: 'drone' | 'seeker' | 'spinner' | 'turret' | 'shot' | 'orb' | 'splitter' | 'sniper' | 'kamikaze';
+  type:
+    | 'drone'
+    | 'seeker'
+    | 'spinner'
+    | 'turret'
+    | 'shot'
+    | 'orb'
+    | 'splitter'
+    | 'sniper'
+    | 'kamikaze'
+    | 'shielder'
+    | 'mender'
+    | 'bomber'
+    | 'mine';
   /** Armoured gold variant: several hits, always drops loot. */
   elite?: boolean;
   /** Starting HP, for the pip display. */
@@ -271,6 +295,12 @@ export interface HazardEntity {
   reflected?: boolean;
   /** Polarity shot (DYNAMO): 1 = blue, -1 = red. */
   pol?: number;
+  /** Protected by a Mender's ward: bullets bounce off, a Dash still smashes it. */
+  warded?: boolean;
+  /** Mender: ids of the enemies it is warding right now. */
+  wardIds?: number[];
+  /** Mine: the pilot flew too close and the short fuse is burning. */
+  triggered?: boolean;
 }
 
 export interface LaserEntity {

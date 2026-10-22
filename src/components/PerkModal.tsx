@@ -3,7 +3,7 @@ import { Bomb, ChevronsUp, Crosshair, Flame, Gauge, Gem, Ghost, Repeat, Rocket, 
 import { tr, useLang } from '../i18n';
 import { localPerk } from '../i18n/content';
 import { PerkDef, PerkId } from '../types/game';
-import { PERKS, PERK_REWARDS } from '../utils/constants';
+import { EVOLUTIONS, PERKS, PERK_REWARDS } from '../utils/constants';
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>> = {
   zap: Zap,
@@ -22,7 +22,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
 };
 
 export const perkDef = (id: PerkId): PerkDef =>
-  localPerk(PERKS.find((p) => p.id === id) || PERK_REWARDS.find((p) => p.id === id) || PERKS[0]);
+  localPerk([...PERKS, ...EVOLUTIONS, ...PERK_REWARDS].find((p) => p.id === id) || PERKS[0]);
 
 /** Lucide glyph for a perk (shared with the HUD). */
 export const PerkIcon: React.FC<{ id: PerkId; size?: number; className?: string; style?: React.CSSProperties }> = ({
@@ -101,7 +101,9 @@ export const PerkModal: React.FC<PerkModalProps> = ({ isOpen, options, owned, le
           {options.map((id, i) => {
             const perk = perkDef(id);
             const lvl = levels[id] || 0;
-            const tag = perk.reward
+            const tag = perk.evolves
+              ? { text: tr('Evolution', 'Tiến hóa'), cls: 'bg-gradient-to-r from-amber-300 to-fuchsia-400 text-slate-950 border-amber-200' }
+              : perk.reward
               ? { text: tr('Supply drop', 'Tiếp tế'), cls: 'bg-sky-500/20 text-sky-200 border-sky-400/50' }
               : perk.gambit
               ? { text: tr('Gambit · risk', 'Canh bạc · rủi ro'), cls: 'bg-rose-500/20 text-rose-200 border-rose-400/60' }
@@ -141,6 +143,17 @@ export const PerkModal: React.FC<PerkModalProps> = ({ isOpen, options, owned, le
                   <span className="block text-xs text-slate-300 leading-snug mt-1">
                     {lvl > 0 && perk.upgrade ? `${perk.upgrade}.` : perk.desc}
                   </span>
+                  {perk.evolves && (
+                    <span className="mt-1.5 flex items-center sm:justify-center gap-1 text-[10px] text-slate-400">
+                      {perk.evolves.map((pid, k) => (
+                        <React.Fragment key={pid}>
+                          {k > 0 && <span className="text-slate-500">+</span>}
+                          <PerkIcon id={pid} size={12} style={{ color: perkDef(pid).color }} />
+                          <span>{perkDef(pid).name}</span>
+                        </React.Fragment>
+                      ))}
+                    </span>
+                  )}
                 </span>
                 <span className="hidden sm:flex mt-2 w-7 h-7 rounded-lg border border-slate-600 bg-slate-900 text-slate-300 text-xs font-black font-cyber items-center justify-center group-hover:border-white group-hover:text-white">
                   {i + 1}

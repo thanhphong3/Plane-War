@@ -9,6 +9,7 @@ import {
 } from '../types/game';
 import { canvasFont, getLang, tr } from '../i18n';
 import type { LevelTheme } from './campaign';
+import { MINE_TRIGGER_RADIUS, SHIELD_ARC } from './enemies';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -744,7 +745,126 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
   ctx.save();
   ctx.translate(h.x, h.y);
 
-  if (h.type === 'splitter') {
+  if (h.type === 'shielder') {
+    // Bulwark: armoured octagon with an energy shield wrapped around its underside
+    ctx.beginPath();
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
+      ctx.lineTo(Math.cos(a) * h.r * 0.9, Math.sin(a) * h.r * 0.9);
+    }
+    ctx.closePath();
+    const bg = ctx.createRadialGradient(0, -h.r * 0.3, 2, 0, 0, h.r);
+    bg.addColorStop(0, '#1d4ed8');
+    bg.addColorStop(1, '#0b1a3d');
+    ctx.fillStyle = flash ? '#ffffff' : bg;
+    ctx.fill();
+    ctx.strokeStyle = h.elite ? ELITE : DANGER;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#bae6fd';
+    ctx.beginPath();
+    ctx.arc(0, -h.r * 0.15, h.r * 0.26, 0, Math.PI * 2);
+    ctx.fill();
+    // The shield: a bright arc facing the pilot, so "shoot from the side" reads at a glance
+    const pulse = 0.75 + 0.25 * Math.sin(t * 6 + h.id);
+    const a0 = Math.PI / 2 - SHIELD_ARC;
+    const a1 = Math.PI / 2 + SHIELD_ARC;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = hexToRgba(h.color, 0.35 * pulse);
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.arc(0, 0, h.r + 7, a0, a1);
+    ctx.stroke();
+    ctx.strokeStyle = hexToRgba('#e0f2fe', 0.95 * pulse);
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.restore();
+  } else if (h.type === 'mender') {
+    // Mender: a slowly turning halo around a medic cross
+    ctx.save();
+    ctx.rotate(h.angle);
+    ctx.strokeStyle = hexToRgba(h.color, 0.8);
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 5]);
+    ctx.beginPath();
+    ctx.arc(0, 0, h.r + 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = flash ? '#ffffff' : '#052e16';
+    ctx.strokeStyle = h.elite ? ELITE : DANGER;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, h.r * 0.9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    const beat = 0.85 + 0.15 * Math.sin(t * 5 + h.id);
+    ctx.fillStyle = h.color;
+    const arm = h.r * 0.55 * beat;
+    const w = h.r * 0.3;
+    ctx.fillRect(-w / 2, -arm, w, arm * 2);
+    ctx.fillRect(-arm, -w / 2, arm * 2, w);
+  } else if (h.type === 'bomber') {
+    // Bomber: a flying wing pointing the way it travels, bomb-bay light blinking
+    ctx.rotate(h.vx >= 0 ? 0 : Math.PI);
+    ctx.beginPath();
+    ctx.moveTo(h.r * 1.2, 0);
+    ctx.lineTo(-h.r * 0.6, -h.r * 1.25);
+    ctx.lineTo(-h.r * 0.25, 0);
+    ctx.lineTo(-h.r * 0.6, h.r * 1.25);
+    ctx.closePath();
+    const wg = ctx.createLinearGradient(h.r, 0, -h.r, 0);
+    wg.addColorStop(0, '#99f6e4');
+    wg.addColorStop(1, '#0f766e');
+    ctx.fillStyle = flash ? '#ffffff' : wg;
+    ctx.fill();
+    ctx.strokeStyle = h.elite ? ELITE : DANGER;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = Math.sin(t * 10 + h.id) > 0 ? '#fca5a5' : '#7f1d1d';
+    ctx.beginPath();
+    ctx.arc(h.r * 0.1, 0, h.r * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (h.type === 'mine') {
+    const armed = (h.aimTimer || 0) <= 0;
+    // Blast radius: faint while armed, flaring once the fuse is lit
+    if (armed) {
+      ctx.save();
+      const hot = h.triggered && (fxPrefs.reduceFlash || Math.sin(t * 40) > 0);
+      ctx.strokeStyle = hexToRgba(DANGER, h.triggered ? (hot ? 0.75 : 0.35) : 0.16);
+      ctx.lineWidth = h.triggered ? 2 : 1;
+      ctx.setLineDash([4, 6]);
+      ctx.lineDashOffset = -t * 20;
+      ctx.beginPath();
+      ctx.arc(0, 0, MINE_TRIGGER_RADIUS, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.rotate(h.angle);
+    ctx.strokeStyle = h.color;
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * h.r * 0.7, Math.sin(a) * h.r * 0.7);
+      ctx.lineTo(Math.cos(a) * h.r * 1.25, Math.sin(a) * h.r * 1.25);
+      ctx.stroke();
+    }
+    ctx.fillStyle = flash ? '#ffffff' : '#450a0a';
+    ctx.strokeStyle = DANGER;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, h.r * 0.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    const lit = h.triggered ? Math.sin(t * 40) > 0 : armed ? Math.sin(t * 6 + h.id) > 0 : false;
+    ctx.fillStyle = lit ? '#ffffff' : '#991b1b';
+    ctx.beginPath();
+    ctx.arc(0, 0, h.r * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (h.type === 'splitter') {
     // Cracked hexagon: reads as "this one breaks apart"
     ctx.rotate(h.angle);
     ctx.beginPath();
@@ -967,6 +1087,23 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     ctx.fill();
   }
   ctx.restore();
+
+  // Mender ward: a green hex cage that bullets glance off
+  if (h.warded) {
+    ctx.save();
+    ctx.translate(h.x, h.y);
+    ctx.rotate(-t * 1.2);
+    ctx.strokeStyle = hexToRgba('#86efac', 0.55 + 0.25 * Math.sin(t * 8 + h.id));
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2;
+      ctx.lineTo(Math.cos(a) * (h.r + 8), Math.sin(a) * (h.r + 8));
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // HP pips for anything that takes more than one hit
   const maxHp = h.maxHp || 0;

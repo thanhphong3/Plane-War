@@ -71,6 +71,34 @@ export function createEngineState() {
     perksThisRun: 0,
     /** A revive was already spent this run. */
     revived: false,
+
+    // Run report (Game Over screen)
+    /** What dealt the killing blow (a short label), '' while alive. */
+    killedBy: '',
+    /** What last hit the pilot; becomes `killedBy` if that hit was fatal. */
+    lastHitBy: '',
+    /** Score sampled every few seconds, for the run graph. */
+    scoreTimeline: [] as number[],
+    timelineAcc: 0,
+    /** Run time (s) of each boss kill, for markers on the graph. */
+    bossKillTimes: [] as number[],
+    /** Enemies destroyed (shots, mines and boss parts aside). */
+    killsThisRun: 0,
+    parriesThisRun: 0,
+    /** Newer enemy types already introduced by IRIS this run. */
+    seenTypes: [] as string[],
+    /** Tempest Echo zap cadence. */
+    tempestTimer: 0,
+
+    // Flight Training
+    /** Current lesson (index into the tutorial script), -1 outside training. */
+    tutStep: -1,
+    /** Progress towards the current lesson's goal. */
+    tutProgress: 0,
+    /** Seconds before the next lesson starts (a short "nice!" beat). */
+    tutDelay: 0,
+    /** Respawn timer for the current lesson's props. */
+    tutSpawn: 0,
     /** Daily Challenge rule twists active this run. */
     modifiers: [] as DailyModifierId[],
     /** Endless biomes: theme index fading from -> to (-1 = default neon look). */

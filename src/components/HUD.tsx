@@ -5,7 +5,7 @@ import { questById } from '../game/progression';
 import { tr, numLocale } from '../i18n';
 import { localModifier, questLabel } from '../i18n/content';
 import { DailyModifierId, DailyQuestState, GameMode, PerkId } from '../types/game';
-import { DAILY_MODIFIERS, MAX_WEAPON_LEVEL } from '../utils/constants';
+import { BOSS_RUSH_ORDER, DAILY_MODIFIERS, MAX_WEAPON_LEVEL } from '../utils/constants';
 import { ShardIcon } from './Icon';
 import { PerkIcon, perkDef } from './PerkModal';
 
@@ -121,8 +121,8 @@ export const HUD: React.FC<HUDProps> = ({
 }) => {
   const dashReady = dashCooldown <= 0;
   const dashProgress = dashMaxCooldown > 0 ? 1 - dashCooldown / dashMaxCooldown : 1;
-  // Show the first mission still open today
-  const openIdx = quests.ids.findIndex((_, i) => !quests.done[i]);
+  // Show the first mission still open today (training never counts towards missions)
+  const openIdx = gameMode === 'tutorial' ? -1 : quests.ids.findIndex((_, i) => !quests.done[i]);
   const currentQuest = openIdx >= 0 ? questById(quests.ids[openIdx]) : null;
   const questClamped = currentQuest ? Math.min(currentQuest.target, Math.floor(questProgress[openIdx] || 0)) : 0;
   const hotCombo = combo >= 10;
@@ -130,7 +130,9 @@ export const HUD: React.FC<HUDProps> = ({
   const stageLabel = level
     ? level.code
     : bossRush > 0
-    ? `BOSS ${bossRush}/7`
+    ? `BOSS ${bossRush}/${BOSS_RUSH_ORDER.length}`
+    : gameMode === 'tutorial'
+    ? tr('TRAINING', 'HUẤN LUYỆN')
     : gameMode === 'daily'
     ? `${tr('DAILY', 'NGÀY')} · ${tr('LV', 'CẤP')} ${waveLevel}`
     : `${tr('LV', 'CẤP')} ${waveLevel}`;

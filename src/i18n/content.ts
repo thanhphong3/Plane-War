@@ -62,6 +62,10 @@ const PERKS_VI: Record<string, { name: string; desc: string; upgrade?: string }>
   reward_shield: { name: 'Pin Khiên', desc: '+1 Khiên Năng Lượng ngay lập tức.' },
   reward_power: { name: 'Kho Vũ Khí', desc: '+1 cấp Hỏa Lực (thưởng điểm lớn nếu đã tối đa).' },
   reward_emp: { name: 'Thùng EMP', desc: '+2 Bom EMP.' },
+  tempest_echo: { name: 'Bóng Ảnh Bão Tố', desc: 'Bóng Ảnh Holo cứ 0.7s giật sét kẻ địch gần nhất, và vụ nổ của nó lan sét dây chuyền.' },
+  seeker_prism: { name: 'Lăng Kính Truy Kích', desc: 'Đạn nảy khỏi mép màn hình hóa thành đạn đuổi, +30% sát thương.' },
+  event_horizon: { name: 'Chân Trời Sự Kiện', desc: 'Mỗi viên đạn bị Siêu Tân Tinh xóa đều nạp Tụ Điện Động Năng, và tính điểm gấp đôi.' },
+  redline: { name: 'Vạch Đỏ', desc: 'Khi không có khiên, mỗi viên đạn xuyên thêm một kẻ địch và Lướt hồi nhanh hơn 25%.' },
 };
 
 const QUESTS_VI: Record<string, string> = {

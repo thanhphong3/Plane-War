@@ -278,6 +278,49 @@ export const PERK_REWARDS: PerkDef[] = [
   { id: 'reward_emp', name: 'EMP Crate', desc: '+2 EMP Bombs.', icon: 'bomb', color: '#fbbf24', maxLevel: 1, reward: true },
 ];
 
+/**
+ * Evolutions: once both parent perks are installed, one is guaranteed a slot in the next picker.
+ * Each is a one-level upgrade that makes the pair work together.
+ */
+export const EVOLUTIONS: PerkDef[] = [
+  {
+    id: 'tempest_echo',
+    name: 'Tempest Echo',
+    desc: 'Holo Echo decoys zap the nearest enemy every 0.7s, and their blast chains lightning.',
+    icon: 'zap',
+    color: '#c084fc',
+    maxLevel: 1,
+    evolves: ['dash_decoy', 'chain_dash'],
+  },
+  {
+    id: 'seeker_prism',
+    name: 'Seeker Prism',
+    desc: 'Bullets that bounce off a wall turn into homing rounds with +30% damage.',
+    icon: 'bounce',
+    color: '#f0abfc',
+    maxLevel: 1,
+    evolves: ['ricochet', 'combo_missiles'],
+  },
+  {
+    id: 'event_horizon',
+    name: 'Event Horizon',
+    desc: 'Every bullet a Supernova wipes charges the Kinetic Capacitor, and scores double.',
+    icon: 'sun',
+    color: '#7dd3fc',
+    maxLevel: 1,
+    evolves: ['overdrive_nova', 'graze_shield'],
+  },
+  {
+    id: 'redline',
+    name: 'Redline',
+    desc: 'With no shield up, every bullet pierces one extra enemy and Dash recharges 25% faster.',
+    icon: 'flame',
+    color: '#fb7185',
+    maxLevel: 1,
+    evolves: ['berserk_barrel', 'shard_frenzy'],
+  },
+];
+
 /** Per-level numbers for each scaling perk (index = level - 1). */
 export const PERK_TUNING = {
   chain_dash: { targets: [3, 5, 7], dmg: [4, 5, 6], range: [280, 320, 360] },
@@ -617,4 +660,8 @@ export const INITIAL_SAVE: SaveData = {
   settings: DEFAULT_SETTINGS,
   totalElites: 0,
   totalRevives: 0,
+  tutorialDone: false,
 };
+
+/** Shards paid once for finishing Flight Training. */
+export const TUTORIAL_REWARD = 60;

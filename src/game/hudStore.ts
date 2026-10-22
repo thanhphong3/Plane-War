@@ -34,6 +34,9 @@ export interface HudSnapshot {
   grazeCharge: number;
   /** Boss Rush: current boss number (1-based), -1 outside Boss Rush. */
   bossRush: number;
+  /** Flight Training lesson (-1 outside training) and progress towards its goal. */
+  tutStep: number;
+  tutProgress: number;
 }
 
 /**

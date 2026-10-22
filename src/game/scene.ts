@@ -115,6 +115,26 @@ export function renderScene(
   for (const b of e.bullets) drawBullet(ctx, b, t);
   ctx.restore();
 
+  // Mender ward beams, under the enemies they protect
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.setLineDash([6, 6]);
+  ctx.lineDashOffset = -t * 40;
+  ctx.lineWidth = 2;
+  for (const m of e.hazards) {
+    if (m.type !== 'mender' || !m.wardIds?.length) continue;
+    for (const id of m.wardIds) {
+      const a = e.hazards.find((h) => h.id === id);
+      if (!a) continue;
+      ctx.strokeStyle = hexToRgba('#4ade80', 0.55);
+      ctx.beginPath();
+      ctx.moveTo(m.x, m.y);
+      ctx.lineTo(a.x, a.y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
   for (const h of e.hazards) if (h.type !== 'shot') drawHazard(ctx, h, t, p.x, p.y);
   if (e.dashHintId >= 0 && st === 'PLAYING') {
     const target = e.hazards.find((h) => h.id === e.dashHintId);

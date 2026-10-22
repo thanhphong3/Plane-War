@@ -74,6 +74,7 @@ export function loadGameSave(): SaveData {
       settings: { ...DEFAULT_SETTINGS, ...(isObj(parsed.settings) ? parsed.settings : {}) },
       totalElites: typeof parsed.totalElites === 'number' ? parsed.totalElites : 0,
       totalRevives: typeof parsed.totalRevives === 'number' ? parsed.totalRevives : 0,
+      tutorialDone: parsed.tutorialDone === true,
     };
   } catch {
     backupCorrupt(raw);
