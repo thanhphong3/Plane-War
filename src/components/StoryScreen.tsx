@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, ChevronsRight, KeyRound, Play, Skull } from 'lucide-react';
-import { LevelDef, SPEAKERS } from '../game/campaign';
+import { ACT_II_START, LevelDef, SPEAKERS } from '../game/campaign';
 import { tr } from '../i18n';
 import { sound } from '../utils/audio';
 
@@ -69,7 +69,8 @@ export const StoryScreen: React.FC<StoryScreenProps> = ({ level, kind, isFinal, 
     return () => window.removeEventListener('keydown', onKey);
   }, [advance, finish, onDone, showIntel]);
 
-  const keyNumber = level.id + 1;
+  const actTwo = level.id >= ACT_II_START;
+  const keyNumber = actTwo ? level.id - ACT_II_START + 1 : level.id + 1;
 
   return (
     <div
@@ -123,14 +124,25 @@ export const StoryScreen: React.FC<StoryScreenProps> = ({ level, kind, isFinal, 
         ) : (
           <>
             <p className="text-xs font-bold tracking-[0.4em] font-cyber text-amber-300">
-              {isFinal ? tr('CORE REBOOTED', 'LÕI ĐÃ KHỞI ĐỘNG LẠI') : tr('SECTOR CLEARED', 'ĐÃ GIẢI PHÓNG KHU VỰC')}
+              {!isFinal
+                ? tr('SECTOR CLEARED', 'ĐÃ GIẢI PHÓNG KHU VỰC')
+                : actTwo
+                ? tr('ARCHIVE SEALED', 'KHO LƯU TRỮ ĐÃ NIÊM PHONG')
+                : tr('CORE REBOOTED', 'LÕI ĐÃ KHỞI ĐỘNG LẠI')}
             </p>
             <h1 className="text-3xl sm:text-5xl font-black font-cyber text-white uppercase mt-1 neon-glow-amber">
-              {isFinal ? tr('The Grid Lives', 'Lưới Hồi Sinh') : tr(`${level.bossName} Falls`, `${level.bossName} Gục Ngã`)}
+              {!isFinal
+                ? tr(`${level.bossName} Falls`, `${level.bossName} Gục Ngã`)
+                : actTwo
+                ? tr('The Deep Sleeps', 'Vực Sâu Đã Ngủ')
+                : tr('The Grid Lives', 'Lưới Hồi Sinh')}
             </h1>
             {!isFinal && (
               <p className="text-sm text-amber-200 mt-2 flex items-center justify-center gap-1.5 font-bold">
-                <KeyRound size={15} /> {tr(`Root Key ${keyNumber}/5 recovered`, `Đã thu hồi Khóa Gốc ${keyNumber}/5`)}
+                <KeyRound size={15} />{' '}
+                {actTwo
+                  ? tr(`Archive Seal ${keyNumber}/4 recovered`, `Đã thu hồi Ấn Niêm Phong ${keyNumber}/4`)
+                  : tr(`Root Key ${keyNumber}/5 recovered`, `Đã thu hồi Khóa Gốc ${keyNumber}/5`)}
               </p>
             )}
           </>

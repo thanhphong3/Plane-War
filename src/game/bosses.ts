@@ -27,6 +27,8 @@ export interface ShotOpts {
   ghost?: boolean;
   glitch?: boolean;
   ay?: number;
+  /** Polarity (DYNAMO): 1 = blue, -1 = red. */
+  pol?: number;
 }
 
 export interface BossApi {
@@ -1361,6 +1363,1042 @@ const nullBoss: BossBehavior = {
   },
 };
 
+// ===========================================================================
+// ACT II — THE DEEP ARCHIVE
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// MIMIC — a mirror image of the pilot. Bullets can't hurt a perfect copy:
+// steer its reflection into its own mines instead.
+// ---------------------------------------------------------------------------
+const MIRROR_ABSORB = 16;
+const MIMIC_COLOR = '#e2e8f0';
+
+/** Where the reflection wants to be: the pilot mirrored through the screen centre. */
+function mimicTarget(api: BossApi) {
+  const p = api.player;
+  return { x: api.W - p.x, y: Math.max(70, Math.min(api.H - 70, api.H - p.y)) };
+}
+
+function mimicMine(b: BossEntity, api: BossApi) {
+  const { W, H } = api;
+  for (let tries = 0; tries < 10; tries++) {
+    const x = 40 + Math.random() * (W - 80);
+    const y = H * 0.1 + Math.random() * H * 0.32;
+    if (dist(x, y, b.x, b.y) < 120) continue;
+    if (b.parts.some((m) => dist(x, y, m.x, m.y) < 80)) continue;
+    const m = makePart(x, y, 15, 1);
+    m.timer = 0.9; // arming
+    m.a = Math.random() * TAU; // drift heading once the mirror starts lagging
+    b.parts.push(m);
+    return;
+  }
+}
+
+function mimicDetonate(b: BossEntity, api: BossApi, m: BossPart, byMirror: boolean) {
+  b.parts.splice(b.parts.indexOf(m), 1);
+  api.sfx('boom');
+  api.shake(byMirror ? 16 : 8);
+  api.shockwave(m.x, m.y, MIMIC_COLOR, byMirror ? 200 : 110, byMirror ? 5 : 3);
+  api.particles(m.x, m.y, MIMIC_COLOR, byMirror ? 36 : 16, 320, true);
+  if (!byMirror) {
+    api.text(m.x, m.y - 20, tr('MINE CLEARED', 'ĐÃ PHÁ MÌN'), '#cbd5e1', 13);
+    return;
+  }
+  api.flash(MIMIC_COLOR, 0.3);
+  api.slowmo(0.45, 0.25);
+  api.text(m.x, m.y - 24, tr('MIRROR CRACKED!', 'GƯƠNG NỨT!'), '#fde047', 17);
+  ring(api, m.x, m.y, 8, 130, Math.random(), { color: '#cbd5e1' });
+  damage(b, api, b.maxHp * 0.075);
+}
+
+const mimic: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(34, api.W * 0.08);
+    b.v.absorbed = 0;
+    b.v.freeze = 0;
+    b.v.mineT = 1.2;
+    b.v.lagged = 0;
+    b.v.burst = 0;
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    const rage = b.hp / b.maxHp < 0.5;
+    if (b.v.freeze > 0) b.v.freeze -= dt;
+    b.status =
+      b.v.freeze > 0
+        ? tr(`MIRROR FROZEN ${b.v.freeze.toFixed(1)}s — FIRE!`, `GƯƠNG ĐÓNG BĂNG ${b.v.freeze.toFixed(1)}s — BẮN!`)
+        : b.v.absorbed >= MIRROR_ABSORB * 0.6
+        ? tr(`Absorbed ${b.v.absorbed}/${MIRROR_ABSORB} — it will fire them back!`, `Đã hấp thụ ${b.v.absorbed}/${MIRROR_ABSORB} — nó sắp bắn trả!`)
+        : tr('It copies you — steer its reflection into the MINES', 'Nó bắt chước bạn — lái hình phản chiếu vào MÌN');
+    if (!ready) return;
+    b.t += dt;
+    b.angle += dt;
+    const { W, H } = api;
+    const p = api.player;
+
+    if (rage && !b.v.lagged) {
+      b.v.lagged = 1;
+      api.banner(tr('REFLECTION LAG!', 'PHẢN CHIẾU TRỄ NHỊP!'), 'neon-glow-pink');
+      api.comm('iris', tr('It’s lagging behind you now, and the mines are drifting. Lead it in!', 'Giờ nó trễ nhịp so với bạn, và mìn bắt đầu trôi. Dẫn nó vào!'));
+    }
+
+    // Follow the mirror point (snappier while you dash, sluggish once enraged)
+    if (b.v.freeze <= 0 && api.alive) {
+      const m = mimicTarget(api);
+      const rate = p.dashTimer > 0 ? 14 : rage ? 2.6 : 7;
+      const k = 1 - Math.exp(-rate * dt);
+      b.x += (m.x - b.x) * k;
+      b.y += (m.y - b.y) * k;
+    }
+
+    // Mines: arm, drift, trigger
+    b.v.mineT -= dt;
+    if (b.v.mineT <= 0) {
+      b.v.mineT = rage ? 1.9 : 2.4;
+      if (b.parts.length < (rage ? 5 : 4)) mimicMine(b, api);
+    }
+    for (let i = b.parts.length - 1; i >= 0; i--) {
+      const m = b.parts[i];
+      if (m.timer > 0) {
+        m.timer -= dt;
+        continue;
+      }
+      if (rage) {
+        const a = m.a || 0;
+        m.x += Math.cos(a) * 26 * dt;
+        m.y += Math.sin(a) * 26 * dt;
+        if (m.x < 30 || m.x > W - 30) m.a = Math.PI - a;
+        if (m.y < H * 0.08 || m.y > H * 0.45) m.a = -a;
+        m.x = Math.max(30, Math.min(W - 30, m.x));
+        m.y = Math.max(H * 0.08, Math.min(H * 0.45, m.y));
+      }
+      if (dist(b.x, b.y, m.x, m.y) < b.r * 0.8 + m.r) {
+        mimicDetonate(b, api, m, true);
+        if (b.hp <= 0) return;
+        continue;
+      }
+      if (api.alive && dist(p.x, p.y, m.x, m.y) < m.r + p.radius * 0.6) {
+        if (isDashing(api)) mimicDetonate(b, api, m, false);
+        else {
+          b.parts.splice(i, 1);
+          api.particles(m.x, m.y, MIMIC_COLOR, 16, 260, true);
+          api.hurtPlayer();
+        }
+      }
+    }
+
+    // Copies your auto-blaster: a straight stream from its own guns
+    if (b.v.burst > 0) {
+      b.v.burstT -= dt;
+      if (b.v.burstT <= 0) {
+        b.v.burstT = 0.07;
+        b.v.burst--;
+        api.shot(b.x + (b.v.burst % 2 ? -9 : 9), b.y + b.r * 0.6, Math.PI / 2, 300, { color: MIMIC_COLOR, r: 4 });
+      }
+    }
+
+    if (!api.alive || b.v.freeze > 0) return;
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    b.attackTimer = rage ? 1.35 : 1.75;
+    const pattern = ['volley', 'stream', 'volley', 'reflect'][b.attackIndex++ % 4];
+    api.sfx('enemy_shot');
+    if (pattern === 'volley') {
+      fan(api, b.x, b.y, aimAt(api, b.x, b.y), rage ? 5 : 3, 0.2, 220, { color: MIMIC_COLOR });
+    } else if (pattern === 'stream') {
+      b.v.burst = rage ? 12 : 8;
+      b.v.burstT = 0;
+    } else {
+      // Reflection: a laser on you and one on your mirror image
+      api.laser(p.x);
+      if (Math.abs(W - p.x * 2) > 80) api.laser(W - p.x);
+    }
+  },
+  bullet(b, api, bl) {
+    if (dist(bl.x, bl.y, b.x, b.y) >= b.r * 0.9) return null;
+    if (b.v.freeze > 0) {
+      damage(b, api, 1.3 * bulletDmg(bl));
+      return 'hit';
+    }
+    b.v.absorbed++;
+    if (b.v.absorbed >= MIRROR_ABSORB) {
+      b.v.absorbed = 0;
+      api.sfx('parry');
+      api.text(b.x, b.y + b.r + 14, tr('REFLECTED!', 'PHẢN XẠ!'), MIMIC_COLOR, 16);
+      fan(api, b.x, b.y, aimAt(api, b.x, b.y), 7, 0.13, 260, { color: '#f8fafc' });
+    }
+    return 'block';
+  },
+  contact(b, api, dashing) {
+    const p = api.player;
+    if (dist(p.x, p.y, b.x, b.y) >= b.r * 0.8 + p.radius) return;
+    if (!dashing) api.hurtPlayer();
+    else if (b.v.freeze > 0) bodyContact(b, api, true, b.x, b.y, b.r, 10, tr('SHATTER STRIKE!', 'ĐÒN VỠ GƯƠNG!'));
+    else bounce(api, b.x, b.y, tr('MIRRORED!', 'PHẢN CHIẾU!'));
+  },
+  emp(b, api) {
+    b.v.freeze = 3.5;
+    damage(b, api, b.maxHp * 0.04);
+    api.banner(tr('MIRROR FROZEN — FIRE!', 'GƯƠNG ĐÓNG BĂNG — BẮN!'), 'neon-glow-amber');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// DYNAMO — polarity. Every Dash flips the pilot's charge; same-colour shots
+// are absorbed into FLUX, and only an opposite charge can hurt the shell.
+// ---------------------------------------------------------------------------
+const POL_BLUE = '#60a5fa';
+const POL_RED = '#f43f5e';
+const polColor = (pol: number) => (pol > 0 ? POL_BLUE : POL_RED);
+const polName = (pol: number) => (pol > 0 ? tr('BLUE', 'XANH') : tr('RED', 'ĐỎ'));
+
+function polShot(api: BossApi, x: number, y: number, a: number, speed: number, pol: number, r?: number) {
+  api.shot(x, y, a, speed, { color: polColor(pol), pol, r });
+}
+
+/** A gapless row of one colour sweeping down the screen: match it or eat it. */
+function polarWall(api: BossApi, pol: number) {
+  const n = Math.ceil(api.W / 32);
+  for (let i = 0; i <= n; i++) polShot(api, (i * api.W) / n, 24, Math.PI / 2, 125, pol, 7);
+}
+
+const dynamo: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(52, api.W * 0.115);
+    b.v.pp = 1; // pilot charge
+    b.v.bp = -1; // shell charge — starts opposite, so the pilot can open fire
+    b.v.flipT = 7;
+    b.v.warned = 0;
+    b.v.flux = 0;
+    b.v.dashWas = 0;
+    b.v.repelText = 0;
+    b.v.wall2 = 0;
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    const rage = b.hp / b.maxHp < 0.45;
+    const p = api.player;
+    b.angle += dt * (rage ? 2.2 : 1.4) * b.v.bp;
+    if (b.v.repelText > 0) b.v.repelText -= dt;
+
+    // Every Dash flips the pilot's charge
+    const dashing = p.dashTimer > 0;
+    if (dashing && !b.v.dashWas && api.alive) {
+      b.v.pp *= -1;
+      api.text(p.x, p.y - 30, tr(`CHARGE: ${polName(b.v.pp)}`, `CỰC: ${polName(b.v.pp)}`), polColor(b.v.pp), 14);
+      api.shockwave(p.x, p.y, polColor(b.v.pp), 70, 3);
+    }
+    b.v.dashWas = dashing ? 1 : 0;
+
+    const opposite = b.v.pp !== b.v.bp;
+    b.status = opposite
+      ? tr(
+          `YOU ${polName(b.v.pp)} · SHELL ${polName(b.v.bp)} — FIRE! · FLUX ${Math.floor(b.v.flux)}%`,
+          `BẠN ${polName(b.v.pp)} · VỎ ${polName(b.v.bp)} — BẮN! · FLUX ${Math.floor(b.v.flux)}%`
+        )
+      : tr(
+          `YOU ${polName(b.v.pp)} · SHELL ${polName(b.v.bp)} — DASH to flip · FLUX ${Math.floor(b.v.flux)}%`,
+          `BẠN ${polName(b.v.pp)} · VỎ ${polName(b.v.bp)} — LƯỚT để đổi cực · FLUX ${Math.floor(b.v.flux)}%`
+        );
+    if (!ready) return;
+    b.t += dt;
+    b.x = api.W / 2 + Math.sin(b.t * 0.45) * api.W * 0.22;
+    b.y = b.targetY + Math.sin(b.t * 1.2) * 12;
+
+    // Shell flip, with a warning
+    b.v.flipT -= dt;
+    if (b.v.flipT <= 1.2 && !b.v.warned) {
+      b.v.warned = 1;
+      api.sfx('laser_warn');
+      api.banner(tr('POLARITY SHIFT INCOMING', 'SẮP ĐẢO CỰC'), 'neon-glow-pink');
+    }
+    if (b.v.flipT <= 0) {
+      b.v.bp *= -1;
+      b.v.flipT = rage ? 5 : 6.5;
+      b.v.warned = 0;
+      api.sfx('glitch');
+      api.shockwave(b.x, b.y, polColor(b.v.bp), 220, 5);
+      api.text(b.x, b.y + b.r + 16, tr(`SHELL: ${polName(b.v.bp)}`, `VỎ: ${polName(b.v.bp)}`), polColor(b.v.bp), 16);
+    }
+
+    // Absorb shots that match the pilot's charge (runs before the engine's hit test)
+    if (api.alive) {
+      const reach = p.radius * 0.5 + 12;
+      for (let i = api.hazards.length - 1; i >= 0; i--) {
+        const h = api.hazards[i];
+        if (h.type !== 'shot' || h.pol !== b.v.pp || dist(h.x, h.y, p.x, p.y) > reach + h.r) continue;
+        api.hazards.splice(i, 1);
+        api.particles(h.x, h.y, h.color, 3, 90);
+        b.v.flux = Math.min(100, b.v.flux + 4);
+      }
+      if (b.v.flux >= 100) {
+        b.v.flux = 0;
+        api.sfx('fever');
+        api.shake(16);
+        api.flash(polColor(b.v.pp), 0.35);
+        api.slowmo(0.45, 0.3);
+        api.shockwave(p.x, p.y, polColor(b.v.pp), 160, 4);
+        api.shockwave(b.x, b.y, '#ffffff', 240, 6);
+        api.particles(b.x, b.y, polColor(b.v.pp), 40, 340, true);
+        api.banner(tr('FLUX DISCHARGE!', 'XẢ FLUX!'), 'neon-glow-amber');
+        damage(b, api, b.maxHp * 0.1);
+        if (b.hp <= 0) return;
+      }
+    }
+
+    if (b.v.burst > 0) {
+      b.v.burstT -= dt;
+      if (b.v.burstT <= 0) {
+        b.v.burstT = 0.09;
+        b.v.burst--;
+        b.v.burstA += 0.27;
+        for (let k = 0; k < 2; k++) polShot(api, b.x, b.y, b.v.burstA + k * Math.PI, 165, k ? 1 : -1);
+      }
+    }
+    if (b.v.wall2 > 0) {
+      b.v.wall2 -= dt;
+      if (b.v.wall2 <= 0 && api.alive) polarWall(api, -b.v.wallPol);
+    }
+
+    if (!api.alive) return;
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    b.attackTimer = rage ? 1.5 : 1.9;
+    const pattern = ['spiral', 'fan', 'wall', 'fan', 'spiral', 'rain'][b.attackIndex++ % 6];
+    api.sfx('enemy_shot');
+    if (pattern === 'spiral') {
+      b.v.burst = rage ? 18 : 14;
+      b.v.burstT = 0;
+      b.v.burstA = b.t;
+    } else if (pattern === 'fan') {
+      const aim = aimAt(api, b.x, b.y);
+      const n = rage ? 7 : 5;
+      for (let i = 0; i < n; i++) polShot(api, b.x, b.y, aim + (i - (n - 1) / 2) * 0.17, 210, i % 2 ? 1 : -1);
+      if (rage) api.laser(p.x);
+    } else if (pattern === 'wall') {
+      // Always the colour you're NOT: flip to soak it up
+      b.v.wallPol = -b.v.pp;
+      polarWall(api, b.v.wallPol);
+      api.banner(tr(`POLAR WALL — turn ${polName(b.v.wallPol)}!`, `TƯỜNG CỰC — đổi sang ${polName(b.v.wallPol)}!`), 'neon-glow-pink');
+      if (rage) b.v.wall2 = 1.3;
+    } else {
+      for (let i = 0; i < 12; i++) {
+        polShot(api, 30 + Math.random() * (api.W - 60), -10, Math.PI / 2 + (Math.random() - 0.5) * 0.3, 150 + Math.random() * 50, Math.random() < 0.5 ? 1 : -1);
+      }
+    }
+  },
+  bullet(b, api, bl) {
+    if (dist(bl.x, bl.y, b.x, b.y) >= b.r * 0.9) return null;
+    if (b.v.pp !== b.v.bp) {
+      damage(b, api, bulletDmg(bl));
+      return 'hit';
+    }
+    if (b.v.repelText <= 0) {
+      b.v.repelText = 1.2;
+      api.text(bl.x, bl.y - 10, tr('REPELLED — FLIP CHARGE!', 'BỊ ĐẨY — ĐỔI CỰC!'), polColor(b.v.bp), 13);
+    }
+    return 'block';
+  },
+  contact(b, api, dashing) {
+    const p = api.player;
+    if (dist(p.x, p.y, b.x, b.y) >= b.r * 0.8 + p.radius) return;
+    if (!dashing) api.hurtPlayer();
+    else if (b.v.pp !== b.v.bp) bodyContact(b, api, true, b.x, b.y, b.r, 10, tr('POLAR STRIKE!', 'ĐÒN TRÁI CỰC!'));
+    else bounce(api, b.x, b.y, tr('REPELLED!', 'BỊ ĐẨY LÙI!'));
+  },
+  emp(b, api) {
+    // Forces the shell opposite to you and tops up FLUX
+    b.v.bp = -b.v.pp;
+    b.v.flipT = 6;
+    b.v.warned = 0;
+    b.v.flux = Math.min(99, b.v.flux + 40);
+    api.banner(tr('EMP — SHELL REVERSED!', 'EMP — VỎ ĐÃ ĐẢO CỰC!'), 'neon-glow-amber');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// CHRONOS — damage is borrowed time: it rewinds when the minute hand hits XII,
+// unless the pendulum is broken to lock it in.
+// ---------------------------------------------------------------------------
+const CLOCK_TURN = 11;
+const CLOCK_GOLD = '#fbbf24';
+/** Shots caught in a Time Stop, re-aimed when time resumes. */
+const frozenShots = new WeakSet<HazardEntity>();
+
+const chronosHandLen = (api: BossApi) => Math.min(api.H * 0.56, 470);
+
+/** Body damage that still counts as unbanked (rewindable) unless the clock is stopped. */
+function chronosHit(b: BossEntity, api: BossApi, amount: number) {
+  const before = b.hp;
+  damage(b, api, amount);
+  if (b.v.stopped <= 0) b.v.pending += before - b.hp;
+}
+
+function chronosBreak(b: BossEntity, api: BossApi) {
+  const bob = b.parts[0];
+  if (!bob || !bob.alive) return;
+  bob.alive = false;
+  bob.timer = 6;
+  b.v.breaks++;
+  const banked = b.v.pending;
+  b.v.pending = 0;
+  b.v.stopped = 3.5;
+  api.sfx('fever');
+  api.shake(16);
+  api.flash(CLOCK_GOLD, 0.35);
+  api.slowmo(0.4, 0.35);
+  api.shockwave(bob.x, bob.y, CLOCK_GOLD, 200, 5);
+  api.particles(bob.x, bob.y, '#fde68a', 34, 320, true);
+  api.banner(
+    banked > 0
+      ? tr(`CLOCK STOPPED — ${Math.round(banked * 1.5)} DAMAGE LOCKED IN!`, `ĐỒNG HỒ DỪNG — KHÓA ${Math.round(banked * 1.5)} SÁT THƯƠNG!`)
+      : tr('CLOCK STOPPED — FIRE!', 'ĐỒNG HỒ DỪNG — BẮN!'),
+    'neon-glow-amber'
+  );
+  // Interest: half as much again, applied straight to the locked-in HP
+  if (banked > 0) damage(b, api, banked * 0.5);
+}
+
+function chronosRewind(b: BossEntity, api: BossApi) {
+  api.sfx('glitch');
+  if (b.v.pending <= 0) {
+    api.text(b.x, b.y - b.r - 16, tr('TICK.', 'TÍCH.'), '#fde68a', 14);
+    return;
+  }
+  const back = b.v.pending;
+  b.v.pending = 0;
+  b.hp = Math.min(b.maxHp, b.hp + back);
+  b.v.rewindFx = 1.2;
+  api.flash(CLOCK_GOLD, 0.25);
+  api.shake(10);
+  api.shockwave(b.x, b.y, '#fde68a', 260, 4);
+  api.banner(tr(`REWIND — ${Math.round(back)} HP RESTORED`, `TUA NGƯỢC — HỒI ${Math.round(back)} HP`), 'neon-glow-pink');
+  if (!b.v.rewinds++) api.comm('chronos', tr('Again. And again. And again.', 'Lại. Lại nữa. Lại mãi.'));
+}
+
+const chronos: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(56, api.W * 0.12);
+    b.targetY = Math.max(170, api.H * 0.22);
+    b.v.L = Math.min(api.H * 0.28, 180);
+    b.v.handL = chronosHandLen(api);
+    b.v.hand = 0;
+    b.v.pending = 0;
+    b.v.stopped = 0;
+    b.v.breaks = 0;
+    b.v.swingT = 0;
+    b.v.rewinds = 0;
+    b.v.ts = 0;
+    b.v.tsWarn = 0;
+    b.parts = [makePart(b.x, b.y + b.v.L, 17, 8)];
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    const rage = b.hp / b.maxHp < 0.45;
+    const stopped = b.v.stopped > 0;
+    if (b.v.rewindFx > 0) b.v.rewindFx -= dt;
+    b.angle += dt * (stopped ? 0 : 0.5);
+
+    // Pendulum (frozen while the clock is stopped)
+    if (!stopped) b.v.swingT += dt;
+    const bob = b.parts[0];
+    const sw = Math.sin(b.v.swingT * (rage ? 2.1 : 1.6)) * 1.05;
+    bob.x = b.x + Math.sin(sw) * b.v.L;
+    bob.y = b.y + Math.cos(sw) * b.v.L;
+    if (!bob.alive) {
+      bob.timer -= dt;
+      if (bob.timer <= 0) {
+        bob.alive = true;
+        bob.maxHp = bob.hp = 8 + b.v.breaks * 3;
+        api.sfx('powerup');
+        api.text(bob.x, bob.y - 24, tr('PENDULUM REBUILT', 'CON LẮC ĐÃ DỰNG LẠI'), '#fde68a', 14);
+      }
+    }
+
+    b.status =
+      b.v.ts > 0 || b.v.tsWarn > 0
+        ? tr('TIME STOP — get clear before time resumes!', 'NGƯNG THỜI GIAN — tránh xa trước khi thời gian chạy lại!')
+        : stopped
+        ? tr(`CLOCK STOPPED ${b.v.stopped.toFixed(1)}s — every hit is permanent!`, `ĐỒNG HỒ DỪNG ${b.v.stopped.toFixed(1)}s — mọi đòn đều vĩnh viễn!`)
+        : b.v.pending > 0
+        ? tr(`UNBANKED ${Math.round(b.v.pending)} — break the PENDULUM before XII!`, `CHƯA KHÓA ${Math.round(b.v.pending)} — phá CON LẮC trước khi điểm XII!`)
+        : tr('Hit it, then break the PENDULUM to lock the damage in', 'Đánh nó, rồi phá CON LẮC để khóa sát thương');
+    if (!ready) return;
+    b.t += dt;
+    b.x = api.W / 2 + Math.sin(b.t * 0.35) * api.W * 0.15;
+    b.y = b.targetY + Math.sin(b.t * 0.9) * 8;
+
+    // Minute hand: a full turn back to XII rewinds every unbanked point of damage
+    if (stopped) b.v.stopped -= dt;
+    else {
+      b.v.hand += (TAU / (rage ? 9 : CLOCK_TURN)) * dt;
+      if (b.v.hand >= TAU) {
+        b.v.hand -= TAU;
+        chronosRewind(b, api);
+      }
+    }
+    const ha = -Math.PI / 2 + b.v.hand;
+    const L = (b.v.handL = chronosHandLen(api));
+    if (tetherTouch(api, b.x + Math.cos(ha) * b.r, b.y + Math.sin(ha) * b.r, b.x + Math.cos(ha) * L, b.y + Math.sin(ha) * L) === 'hit') {
+      api.hurtPlayer();
+    }
+
+    // Time Stop: freeze every bullet, then fling them all at the pilot
+    if (b.v.tsWarn > 0) {
+      b.v.tsWarn -= dt;
+      if (b.v.tsWarn <= 0) {
+        for (const h of api.hazards) {
+          if (h.type !== 'shot') continue;
+          h.vx = 0;
+          h.vy = 0;
+          h.ay = undefined;
+          frozenShots.add(h);
+        }
+        b.v.ts = 1.8;
+        api.sfx('fever');
+        api.flash('#fde68a', 0.2);
+      }
+    }
+    if (b.v.ts > 0) {
+      b.v.ts -= dt;
+      if (b.v.ts <= 0) {
+        for (const h of api.hazards) {
+          if (!frozenShots.has(h)) continue;
+          frozenShots.delete(h);
+          const a = aimAt(api, h.x, h.y) + (Math.random() - 0.5) * 0.25;
+          const sp = 150 + Math.random() * 40;
+          h.vx = Math.cos(a) * sp;
+          h.vy = Math.sin(a) * sp;
+          h.angle = a;
+        }
+        api.sfx('dash');
+        api.text(api.player.x, api.player.y - 30, tr('TIME RESUMES!', 'THỜI GIAN CHẠY LẠI!'), '#fde68a', 15);
+      }
+    }
+
+    if (!api.alive || b.v.ts > 0 || b.v.tsWarn > 0) return;
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    b.attackTimer = rage ? 1.5 : 1.9;
+    const pattern = ['tick', 'gears', 'tick', 'timestop'][b.attackIndex++ % 4];
+    api.sfx('enemy_shot');
+    const gold = { color: '#fde68a' };
+    if (pattern === 'tick') {
+      ring(api, b.x, b.y, 12, 140, ha, gold);
+      if (rage) ring(api, b.x, b.y, 12, 100, ha + Math.PI / 12, gold);
+    } else if (pattern === 'gears') {
+      fan(api, b.x, b.y, aimAt(api, b.x, b.y), 5, 0.17, 210, { color: CLOCK_GOLD });
+      if (rage) api.laser(api.player.x);
+    } else {
+      ring(api, b.x, b.y, rage ? 22 : 16, 160, b.t, gold);
+      fan(api, b.x, b.y, aimAt(api, b.x, b.y), 3, 0.3, 190, gold);
+      b.v.tsWarn = 0.7;
+      api.banner(tr('TIME STOP!', 'NGƯNG ĐỌNG THỜI GIAN!'), 'neon-glow-pink');
+    }
+  },
+  bullet(b, api, bl) {
+    const bob = b.parts[0];
+    if (bob && bob.alive && dist(bl.x, bl.y, bob.x, bob.y) < bob.r + 5) {
+      bob.hp -= bulletDmg(bl);
+      bob.hitFlash = 0.06;
+      if (bob.hp <= 0) chronosBreak(b, api);
+      return 'hit';
+    }
+    if (dist(bl.x, bl.y, b.x, b.y) >= b.r * 0.85) return null;
+    chronosHit(b, api, bulletDmg(bl));
+    return 'hit';
+  },
+  contact(b, api, dashing) {
+    const p = api.player;
+    const bob = b.parts[0];
+    if (bob && bob.alive && dist(p.x, p.y, bob.x, bob.y) < bob.r + p.radius * 0.7) {
+      if (dashing) {
+        strikeFx(api, tr('PENDULUM SMASHED!', 'ĐẬP VỠ CON LẮC!'), '#fde68a');
+        chronosBreak(b, api);
+      } else api.hurtPlayer();
+    }
+    if (dist(p.x, p.y, b.x, b.y) >= b.r * 0.8 + p.radius) return;
+    if (!dashing) {
+      api.hurtPlayer();
+      return;
+    }
+    if (p.bossContactCd > 0) return;
+    p.bossContactCd = 0.35;
+    strikeFx(api, tr('GEAR STRIKE!', 'ĐÒN BÁNH RĂNG!'));
+    chronosHit(b, api, 10);
+    api.pullPlayer(0, 70);
+  },
+  emp(b, api) {
+    if (b.parts[0]?.alive) chronosBreak(b, api);
+    else b.v.stopped = Math.max(b.v.stopped, 2.5);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// HYDRA — sever a head and two grow back, unless you dash through the stump
+// to cauterize it. No heads left exposes the core.
+// ---------------------------------------------------------------------------
+const HYDRA_MAX = 6;
+const HYDRA_GREEN = '#4ade80';
+
+function hydraHead(b: BossEntity, a: number): BossPart {
+  const pt = makePart(b.x, b.y + 60, 20, 12 + (b.v.gen || 0) * 3);
+  pt.a = a;
+  return pt;
+}
+
+/** Fans the necks evenly across the lower arc, keeping their left-to-right order. */
+function hydraSpread(b: BossEntity) {
+  b.parts.sort((p, q) => (q.a || 0) - (p.a || 0));
+  const n = b.parts.length;
+  b.parts.forEach((pt, i) => (pt.a = Math.PI * 0.08 + ((i + 0.5) / n) * Math.PI * 0.84));
+}
+
+function hydraGrow(b: BossEntity, n: number) {
+  for (let i = 0; i < n; i++) b.parts.push(hydraHead(b, Math.PI / 2));
+  hydraSpread(b);
+}
+
+function hydraSever(b: BossEntity, api: BossApi, pt: BossPart) {
+  pt.alive = false;
+  pt.real = false;
+  pt.hp = 0;
+  pt.timer = api.hard ? 3 : 3.6;
+  api.sfx('boom');
+  api.shake(10);
+  api.shockwave(pt.x, pt.y, HYDRA_GREEN, 120, 4);
+  api.particles(pt.x, pt.y, '#86efac', 28, 300, true);
+  api.text(pt.x, pt.y - 26, tr('SEVERED — DASH THE STUMP!', 'ĐỨT ĐẦU — LƯỚT QUA GỐC!'), '#fde047', 15);
+  if (!b.v.toldStump) {
+    b.v.toldStump = 1;
+    api.comm('iris', tr('Quick, dash through the stump before it splits!', 'Nhanh, lướt xuyên gốc cổ trước khi nó tách đôi!'));
+  }
+}
+
+function hydraCauterize(b: BossEntity, api: BossApi, pt: BossPart) {
+  b.parts.splice(b.parts.indexOf(pt), 1);
+  api.sfx('parry');
+  api.shake(12);
+  api.shockwave(pt.x, pt.y, '#fb923c', 140, 4);
+  api.particles(pt.x, pt.y, '#fdba74', 26, 280, true);
+  api.text(pt.x, pt.y - 24, tr('CAUTERIZED!', 'ĐÃ ĐỐT KÍN!'), '#fdba74', 17);
+  if (b.parts.length === 0) {
+    b.v.exposed = api.hard ? 6 : 7;
+    api.sfx('fever');
+    api.flash(HYDRA_GREEN, 0.35);
+    api.slowmo(0.45, 0.3);
+    api.banner(tr('NO HEADS LEFT — CORE EXPOSED!', 'HẾT ĐẦU — LÕI LỘ RA!'), 'neon-glow-amber');
+  }
+  damage(b, api, b.maxHp * 0.05);
+}
+
+const hydra: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(48, api.W * 0.11);
+    b.targetY = Math.max(170, api.H * 0.22);
+    b.v.neck = Math.min(api.H * 0.2, 130);
+    b.v.gen = 0;
+    b.v.exposed = 0;
+    hydraGrow(b, 3);
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    const rage = b.hp / b.maxHp < 0.5;
+    b.angle += dt;
+    const p = api.player;
+    if (ready) {
+      b.t += dt;
+      b.x = api.W / 2 + Math.sin(b.t * 0.3) * api.W * 0.16;
+      b.y = b.targetY + Math.sin(b.t * 0.8) * 10;
+    }
+
+    const neck = b.v.neck;
+    const regrow: BossPart[] = [];
+    b.parts.forEach((pt, i) => {
+      const a = pt.a || Math.PI / 2;
+      const ax = Math.max(26, Math.min(api.W - 26, b.x + Math.cos(a) * neck * 1.15 + Math.sin(b.t * 1.3 + i * 1.7) * 10));
+      const ay = b.y + Math.sin(a) * neck + Math.cos(b.t * 1.7 + i) * 8;
+      if (!ready) {
+        pt.x = ax;
+        pt.y = ay;
+        return;
+      }
+      if (!pt.alive) {
+        pt.x += (ax - pt.x) * Math.min(1, 4 * dt);
+        pt.y += (ay - pt.y) * Math.min(1, 4 * dt);
+        pt.timer -= dt;
+        if (pt.timer <= 0) regrow.push(pt);
+        return;
+      }
+      if (pt.real) {
+        // Bite: rear back, snap at the locked spot, recoil
+        pt.timer += dt;
+        let tx = ax;
+        let ty = ay;
+        let rate = 6;
+        if (pt.timer < 0.6) {
+          tx = b.x + (ax - b.x) * 0.75;
+          ty = b.y + (ay - b.y) * 0.75;
+        } else if (pt.timer < 0.95) {
+          const reach = neck * 3;
+          const d = dist(pt.tx, pt.ty, b.x, b.y);
+          const k = d > reach ? reach / d : 1;
+          tx = b.x + (pt.tx - b.x) * k;
+          ty = b.y + (pt.ty - b.y) * k;
+          rate = 14;
+        } else if (pt.timer > 1.5) pt.real = false;
+        pt.x += (tx - pt.x) * Math.min(1, rate * dt);
+        pt.y += (ty - pt.y) * Math.min(1, rate * dt);
+        return;
+      }
+      pt.x += (ax - pt.x) * Math.min(1, 5 * dt);
+      pt.y += (ay - pt.y) * Math.min(1, 5 * dt);
+    });
+
+    // Uncauterized stumps split into two heads
+    for (const st of regrow) {
+      b.parts.splice(b.parts.indexOf(st), 1);
+      const n = Math.min(2, HYDRA_MAX - b.parts.length);
+      for (let k = 0; k < n; k++) {
+        const h = hydraHead(b, (st.a || 0) + (k ? 0.2 : -0.2));
+        h.x = st.x;
+        h.y = st.y;
+        b.parts.push(h);
+      }
+      hydraSpread(b);
+      api.sfx('boss_alarm');
+      api.shockwave(st.x, st.y, HYDRA_GREEN, 120, 3);
+      api.banner(n > 1 ? tr('TWO HEADS GROW BACK!', 'MỌC LẠI HAI ĐẦU!') : tr('THE HEAD GROWS BACK!', 'ĐẦU ĐÃ MỌC LẠI!'), 'neon-glow-pink');
+    }
+
+    // Core exposure window, then a fresh set of heads
+    if (b.v.exposed > 0) {
+      b.v.exposed -= dt;
+      if (b.v.exposed <= 0 && b.hp > 0) {
+        b.v.gen++;
+        hydraGrow(b, 3);
+        api.sfx('boss_alarm');
+        api.shockwave(b.x, b.y, HYDRA_GREEN, 200, 4);
+        api.banner(tr('THE HYDRA REGROWS', 'HYDRA MỌC LẠI'), 'neon-glow-pink');
+      }
+    }
+
+    const stumps = b.parts.filter((pt) => !pt.alive);
+    const heads = b.parts.filter((pt) => pt.alive);
+    b.status =
+      b.v.exposed > 0
+        ? tr(`CORE EXPOSED ${b.v.exposed.toFixed(1)}s — FIRE!`, `LÕI LỘ RA ${b.v.exposed.toFixed(1)}s — BẮN!`)
+        : stumps.length
+        ? tr(
+            `STUMP SPLITS IN ${Math.max(0, Math.min(...stumps.map((s) => s.timer))).toFixed(1)}s — DASH THROUGH IT!`,
+            `GỐC TÁCH ĐÔI SAU ${Math.max(0, Math.min(...stumps.map((s) => s.timer))).toFixed(1)}s — LƯỚT XUYÊN QUA!`
+          )
+        : tr(`${heads.length} heads — shoot one off, then dash the stump`, `${heads.length} đầu — bắn rụng một đầu, rồi lướt qua gốc`);
+    if (!ready || !api.alive) return;
+
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    if (b.v.exposed > 0) {
+      b.attackTimer = 1.7;
+      api.sfx('enemy_shot');
+      ring(api, b.x, b.y, 14, 125, b.t, { color: '#86efac' });
+      return;
+    }
+    b.attackTimer = rage ? 1.05 : 1.4;
+    const idle = heads.filter((h) => !h.real);
+    if (!idle.length) return;
+    const head = idle[b.attackIndex % idle.length];
+    const pattern = ['spit', 'spit', 'bite', 'acid'][b.attackIndex++ % 4];
+    if (pattern === 'spit') {
+      api.sfx('enemy_shot');
+      fan(api, head.x, head.y, aimAt(api, head.x, head.y), rage ? 5 : 3, 0.18, 220, { color: '#86efac' });
+    } else if (pattern === 'bite') {
+      head.real = true;
+      head.timer = 0;
+      head.tx = p.x;
+      head.ty = p.y;
+      api.sfx('laser_warn');
+    } else {
+      api.sfx('enemy_shot');
+      for (const h of idle) {
+        for (let k = 0; k < 2; k++) {
+          api.shot(h.x, h.y, aimAt(api, h.x, h.y) + (Math.random() - 0.5) * 0.7, 170 + Math.random() * 80, { color: '#bef264', ay: 110, r: 5 });
+        }
+      }
+    }
+  },
+  bullet(b, api, bl) {
+    for (const pt of b.parts) {
+      if (!pt.alive || dist(bl.x, bl.y, pt.x, pt.y) >= pt.r + 4) continue;
+      pt.hp -= bulletDmg(bl);
+      pt.hitFlash = 0.06;
+      if (pt.hp <= 0) hydraSever(b, api, pt);
+      return 'hit';
+    }
+    const d = dist(bl.x, bl.y, b.x, b.y);
+    if (d >= b.r * 0.9) return null;
+    if (b.v.exposed > 0) {
+      damage(b, api, 1.25 * bulletDmg(bl));
+      return 'hit';
+    }
+    return 'block';
+  },
+  contact(b, api, dashing) {
+    const p = api.player;
+    for (const pt of [...b.parts]) {
+      const d = dist(p.x, p.y, pt.x, pt.y);
+      if (!pt.alive) {
+        if (dashing && d < pt.r + p.radius + 12) hydraCauterize(b, api, pt);
+        continue;
+      }
+      if (d >= pt.r * 0.85 + p.radius * 0.7) continue;
+      if (!dashing) {
+        api.hurtPlayer();
+      } else if (p.bossContactCd <= 0) {
+        p.bossContactCd = 0.3;
+        strikeFx(api, tr('HEAD STRIKE!', 'ĐÒN VÀO ĐẦU!'), '#86efac');
+        pt.hp -= 6;
+        pt.hitFlash = 0.1;
+        if (pt.hp <= 0) hydraSever(b, api, pt);
+      }
+    }
+    if (b.hp <= 0 || dist(p.x, p.y, b.x, b.y) >= b.r * 0.8 + p.radius) return;
+    if (!dashing) api.hurtPlayer();
+    else if (b.v.exposed > 0) bodyContact(b, api, true, b.x, b.y, b.r, 12, tr('ROOT STRIKE!', 'ĐÒN VÀO GỐC!'));
+    else bounce(api, b.x, b.y);
+  },
+  emp(b, api) {
+    const stumps = b.parts.filter((pt) => !pt.alive);
+    if (!stumps.length) {
+      damage(b, api, b.maxHp * 0.05);
+      return;
+    }
+    for (const st of stumps) if (b.hp > 0) hydraCauterize(b, api, st);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// LEVIATHAN — the Archive's garbage collector. An armoured serpent: shoot the
+// glowing tail, dash through the body to sever it, then finish the head.
+// ---------------------------------------------------------------------------
+const LEVI_SEGS = 16;
+const LEVI_GAP = 30;
+const LEVI_TEAL = '#2dd4bf';
+const LEVI_MODES = ['roam', 'charge', 'roam', 'coil'] as const;
+const LEVI_MODE_TIME = { roam: 4.5, charge: 2.0, coil: 5.0 };
+
+function leviMode(b: BossEntity) {
+  return LEVI_MODES[(b.v.mode || 0) % LEVI_MODES.length];
+}
+
+function leviNextMode(b: BossEntity, api: BossApi) {
+  b.v.mode++;
+  b.v.modeT = 0;
+  b.v.retarget = 0;
+  const m = leviMode(b);
+  if (m === 'coil') {
+    b.v.ca = aimAt(api, b.x, b.y) + Math.PI;
+    api.sfx('boss_alarm');
+    api.banner(tr('COIL! — DASH THROUGH ITS BODY!', 'BỊ QUẤN! — LƯỚT XUYÊN THÂN NÓ!'), 'neon-glow-pink');
+  } else if (m === 'charge') {
+    api.sfx('laser_warn');
+  }
+}
+
+/** Removes `count` segments starting at `from` and charges their worth to the boss. */
+function leviDrop(b: BossEntity, api: BossApi, from: number, count: number, sever: boolean) {
+  const lost = b.parts.splice(from, count);
+  if (!lost.length) return;
+  for (const s of lost) {
+    api.particles(s.x, s.y, LEVI_TEAL, 14, 260, true);
+    api.shockwave(s.x, s.y, '#99f6e4', 70, 3);
+  }
+  api.sfx('boom');
+  api.shake(sever ? 18 : 10);
+  const last = lost[lost.length - 1];
+  api.text(
+    last.x,
+    last.y - 24,
+    sever ? tr(`SEVERED x${lost.length}!`, `CHẶT ĐỨT x${lost.length}!`) : tr('TAIL DESTROYED', 'PHÁ ĐUÔI'),
+    sever ? '#fde047' : '#99f6e4',
+    sever ? 18 : 14
+  );
+  const per = b.phase === 2 ? b.v.segVal * 0.4 : b.v.segVal * (sever ? 1.2 : 1);
+  damage(b, api, per * lost.length);
+  if (b.phase === 1 && b.parts.length <= 3 && b.hp > 0) {
+    b.phase = 2;
+    b.v.floor = 0;
+    b.hp = Math.min(b.hp, b.maxHp * 0.3);
+    api.sfx('boss_alarm');
+    api.flash(LEVI_TEAL, 0.4);
+    api.shockwave(b.x, b.y, '#ffffff', 300, 6);
+    api.banner(tr('HEAD EXPOSED — FINAL COLLECTION', 'ĐẦU LỘ RA — LẦN THU GOM CUỐI'), 'neon-glow-amber');
+    api.comm('leviathan', tr('YOU ARE... UNREFERENCED... COLLECT... COLLECT!', 'NGƯƠI... KHÔNG ĐƯỢC THAM CHIẾU... THU GOM... THU GOM!'));
+  }
+}
+
+/** Segments trail the head like a chain. */
+function leviFollow(b: BossEntity) {
+  let lx = b.x;
+  let ly = b.y;
+  for (const s of b.parts) {
+    const d = dist(s.x, s.y, lx, ly);
+    if (d > LEVI_GAP) {
+      const k = (d - LEVI_GAP) / d;
+      s.x += (lx - s.x) * k;
+      s.y += (ly - s.y) * k;
+    }
+    lx = s.x;
+    ly = s.y;
+  }
+}
+
+const leviathan: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(38, api.W * 0.085);
+    b.v.segVal = (b.maxHp * 0.7) / LEVI_SEGS;
+    b.v.floor = b.maxHp * 0.3;
+    b.v.hd = Math.PI / 2;
+    b.v.mode = 0;
+    b.v.modeT = 0;
+    b.v.retarget = 0;
+    b.parts = [];
+    for (let i = 0; i < LEVI_SEGS; i++) {
+      b.parts.push(makePart(b.x, b.y - (i + 1) * LEVI_GAP, 23 - (i / (LEVI_SEGS - 1)) * 9, 9));
+    }
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    if (!ready) {
+      leviFollow(b);
+      b.status = '';
+      return;
+    }
+    const { W, H } = api;
+    const p = api.player;
+    const phase2 = b.phase === 2;
+    b.t += dt;
+    b.v.modeT += dt;
+    const mode = leviMode(b);
+    if (b.v.modeT > LEVI_MODE_TIME[mode]) leviNextMode(b, api);
+
+    let speed = phase2 ? 255 : 205;
+    let turn = 2.6;
+    let tx = b.v.tx;
+    let ty = b.v.ty;
+    if (mode === 'roam') {
+      b.v.retarget -= dt;
+      if (b.v.retarget <= 0 || dist(b.x, b.y, tx, ty) < 50) {
+        b.v.retarget = 2.6;
+        b.v.tx = tx = 60 + Math.random() * (W - 120);
+        b.v.ty = ty = H * 0.12 + Math.random() * H * 0.5;
+      }
+    } else if (mode === 'charge') {
+      if (b.v.modeT < 0.9) {
+        speed = 70;
+        turn = 4;
+        tx = p.x;
+        ty = p.y;
+      } else {
+        speed = phase2 ? 720 : 640;
+        turn = 0;
+      }
+    } else {
+      b.v.ca += dt * 2.1;
+      const R = Math.max(90, 230 - b.v.modeT * 30);
+      tx = p.x + Math.cos(b.v.ca) * R;
+      ty = p.y + Math.sin(b.v.ca) * R;
+      speed = 320;
+      turn = 5.5;
+    }
+    if (turn > 0) {
+      const diff = angDiff(Math.atan2(ty - b.y, tx - b.x), b.v.hd);
+      b.v.hd += Math.max(-turn * dt, Math.min(turn * dt, diff));
+    }
+    b.x += Math.cos(b.v.hd) * speed * dt;
+    b.y += Math.sin(b.v.hd) * speed * dt;
+    // A charge that runs off the screen ends early and swings back in
+    if (b.x < -70 || b.x > W + 70 || b.y < -70 || b.y > H + 70) {
+      if (mode === 'charge' && b.v.modeT >= 0.9) leviNextMode(b, api);
+      b.v.hd += angDiff(Math.atan2(H * 0.4 - b.y, W / 2 - b.x), b.v.hd) * Math.min(1, 6 * dt);
+    }
+    leviFollow(b);
+
+    b.status = phase2
+      ? tr('HEAD EXPOSED — FINISH IT!', 'ĐẦU LỘ RA — KẾT LIỄU NÓ!')
+      : mode === 'coil'
+      ? tr('COILED! Dash through its body to sever it!', 'BỊ QUẤN! Lướt xuyên thân để chặt đứt!')
+      : mode === 'charge' && b.v.modeT < 0.9
+      ? tr('CHARGE INCOMING — get off the line!', 'SẮP LAO TỚI — tránh khỏi đường lao!')
+      : tr(`${b.parts.length} segments — shoot the glowing TAIL, dash to SEVER`, `${b.parts.length} đốt — bắn ĐUÔI phát sáng, lướt để CHẶT`);
+
+    if (!api.alive || mode === 'coil' || (mode === 'charge' && b.v.modeT >= 0.9)) return;
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    b.attackTimer = phase2 ? 1.3 : 1.7;
+    const pattern = (phase2 ? ['maw', 'garbage', 'scales'] : ['scales', 'maw', 'scales'])[b.attackIndex++ % 3];
+    api.sfx('enemy_shot');
+    if (pattern === 'scales') {
+      for (let i = 1; i < b.parts.length; i += 3) {
+        const s = b.parts[i];
+        api.shot(s.x, s.y, aimAt(api, s.x, s.y), 160, { color: '#5eead4', r: 5 });
+      }
+    } else if (pattern === 'maw') {
+      fan(api, b.x, b.y, aimAt(api, b.x, b.y), phase2 ? 7 : 5, 0.17, 230, { color: '#99f6e4' });
+    } else {
+      for (let i = 0; i < 12; i++) {
+        api.shot(30 + Math.random() * (W - 60), -10, Math.PI / 2 + (Math.random() - 0.5) * 0.3, 150 + Math.random() * 60, { color: '#a3e635', glitch: true });
+      }
+    }
+  },
+  bullet(b, api, bl) {
+    if (dist(bl.x, bl.y, b.x, b.y) < b.r * 0.9) {
+      if (b.phase !== 2) return 'block';
+      damage(b, api, bulletDmg(bl));
+      return 'hit';
+    }
+    const n = b.parts.length;
+    for (let i = n - 1; i >= 0; i--) {
+      const s = b.parts[i];
+      if (dist(bl.x, bl.y, s.x, s.y) >= s.r + 3) continue;
+      if (i < n - 1) return 'block';
+      s.hp -= bulletDmg(bl);
+      s.hitFlash = 0.06;
+      if (s.hp <= 0) leviDrop(b, api, i, 1, false);
+      return 'hit';
+    }
+    return null;
+  },
+  contact(b, api, dashing) {
+    const p = api.player;
+    for (let i = 0; i < b.parts.length; i++) {
+      const s = b.parts[i];
+      if (dist(p.x, p.y, s.x, s.y) >= s.r * 0.85 + p.radius * 0.7) continue;
+      if (!dashing) {
+        api.hurtPlayer();
+        return;
+      }
+      if (p.bossContactCd > 0) return;
+      p.bossContactCd = 0.5;
+      strikeFx(api, tr('SEVER!', 'CHẶT!'), '#5eead4');
+      api.slowmo(0.4, 0.3);
+      leviDrop(b, api, i, 5, true);
+      // Cutting it loose breaks the coil
+      if (leviMode(b) === 'coil') leviNextMode(b, api);
+      return;
+    }
+    if (dist(p.x, p.y, b.x, b.y) >= b.r * 0.8 + p.radius) return;
+    if (!dashing) api.hurtPlayer();
+    else if (b.phase === 2) bodyContact(b, api, true, b.x, b.y, b.r, 12, tr('JAW BREAKER!', 'ĐÒN VỠ HÀM!'));
+    else bounce(api, b.x, b.y);
+  },
+  emp(b, api) {
+    if (b.phase === 2) damage(b, api, b.maxHp * 0.05);
+    else leviDrop(b, api, Math.max(0, b.parts.length - 2), 2, false);
+  },
+};
+
 export const BOSSES: Record<BossKind, BossBehavior> = {
   sentinel,
   gatekeeper,
@@ -1369,7 +2407,12 @@ export const BOSSES: Record<BossKind, BossBehavior> = {
   wraith,
   singularity,
   null: nullBoss,
+  mimic,
+  dynamo,
+  chronos,
+  hydra,
+  leviathan,
 };
 
-/** Twin names, exported for rendering. */
-export { TWIN_NAMES };
+/** Shared with the renderer. */
+export { TWIN_NAMES, MIRROR_ABSORB, polColor, leviMode };

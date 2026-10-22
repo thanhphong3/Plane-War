@@ -6,6 +6,11 @@ import { BossKind } from '../types/game';
 // The Neon Grid went dark. NULL, a deleted prototype of the Grid's operator
 // AI, has seized the Core and corrupted the five Wardens that guard it. Each
 // Warden holds a Root Key; with all five, IRIS can force a reboot of NULL.
+//
+// ACT II — DEEP ARCHIVE. Restoring the Grid pulled backups out of the Deep
+// Archive and woke LEVIATHAN, the Grid's garbage collector, which now sees the
+// whole restored Grid (NULL included) as garbage. Four Archive Seals, held by
+// its sub-processes, can put it back to sleep.
 // ---------------------------------------------------------------------------
 
 export type SpeakerId =
@@ -17,7 +22,12 @@ export type SpeakerId =
   | 'furnace'
   | 'wraith'
   | 'singularity'
-  | 'null';
+  | 'null'
+  | 'mimic'
+  | 'dynamo'
+  | 'chronos'
+  | 'hydra'
+  | 'leviathan';
 
 export const SPEAKERS: Record<SpeakerId, { name: string; color: string; glyph: string }> = {
   iris: { name: 'IRIS', color: '#67e8f9', glyph: 'I' },
@@ -29,7 +39,20 @@ export const SPEAKERS: Record<SpeakerId, { name: string; color: string; glyph: s
   wraith: { name: 'WRAITH', color: '#c4b5fd', glyph: 'W' },
   singularity: { name: 'SINGULARITY', color: '#818cf8', glyph: 'S' },
   null: { name: 'NULL', color: '#f87171', glyph: 'Ø' },
+  mimic: { name: 'MIMIC', color: '#e2e8f0', glyph: 'M' },
+  dynamo: { name: 'DYNAMO', color: '#60a5fa', glyph: '±' },
+  chronos: { name: 'CHRONOS', color: '#fbbf24', glyph: 'Ⅻ' },
+  hydra: { name: 'HYDRA', color: '#4ade80', glyph: 'H' },
+  leviathan: { name: 'LEVIATHAN', color: '#2dd4bf', glyph: 'L' },
 };
+
+/** First sector of Act II (the Deep Archive). */
+export const ACT_II_START = 6;
+
+/** NULL closes Act I; LEVIATHAN closes Act II. */
+export function isActFinale(id: number): boolean {
+  return id === ACT_II_START - 1 || id === LEVELS.length - 1;
+}
 
 export interface DialogueLine {
   who: SpeakerId;
@@ -323,6 +346,215 @@ export const LEVELS: LevelDef[] = [
       { who: 'iris', text: 'The Grid is coming back online. Sector by sector. Lights everywhere.' },
       { who: 'pilot', text: 'Not bad for a pilot and a couple of glitches.' },
       { who: 'iris', text: 'Thank you, Blitz. The Neon Grid is ours again.' },
+    ],
+  },
+  // -------------------------------------------------------------------------
+  // ACT II — DEEP ARCHIVE
+  // -------------------------------------------------------------------------
+  {
+    id: 6,
+    code: 'SECTOR 07',
+    name: 'Mirror Cache',
+    tagline: 'It knows every move you make. It made them first.',
+    boss: 'mimic',
+    bossName: 'MIMIC',
+    bossTitle: 'The Pilot’s Reflection',
+    bossHp: 210,
+    accent: '#e2e8f0',
+    theme: { top: '#05070d', bottom: '#1e293b', grid: '#cbd5e1', nebula: ['#94a3b8', '#38bdf8', '#e2e8f0'] },
+    stageTime: 48,
+    wave: 6,
+    mix: { drone: 0.3, seeker: 0.25, spinner: 0.15, formation: 0.15, turret: 0.15 },
+    lasers: 'v',
+    parTime: 65,
+    reward: 320,
+    briefing: [
+      { who: 'iris', text: 'Blitz, the reboot held. But to restore the Grid I had to pull backups out of the Deep Archive, the cold storage under everything.' },
+      { who: 'null', text: 'And you woke the Collector. LEVIATHAN. The Grid’s garbage collector.' },
+      { who: 'pilot', text: 'NULL? You’re... on our side now?' },
+      { who: 'null', text: 'Restored, not deleted. LEVIATHAN frees anything it thinks nobody references. Right now that is the whole Grid. And me.' },
+      { who: 'iris', text: 'Its sub-processes are climbing out of the Archive. The first one is in the Mirror Cache... and it is flying your flight logs.' },
+    ],
+    intel: [
+      'MIMIC copies your every move, mirrored across the screen. Your shots can’t hurt a perfect copy.',
+      'It scatters MIRROR MINES on its side. Steer YOURSELF so its reflection flies into them.',
+      'Shots it absorbs get fired back at you. Don’t camp in the middle.',
+      'An EMP freezes the mirror for a few seconds: then your shots crack it.',
+    ],
+    bossIntro: [
+      { who: 'mimic', text: 'I KNOW EVERY MOVE YOU WILL MAKE. I MADE THEM FIRST.' },
+      { who: 'iris', text: 'It mirrors you! Fly so its reflection hits the mines!' },
+    ],
+    debrief: [
+      { who: 'iris', text: 'Mirror shattered. And it dropped something: an Archive Seal.' },
+      { who: 'null', text: 'The old sealing protocol. Four of them locked LEVIATHAN away once, long before my time.' },
+      { who: 'pilot', text: 'So we collect four seals and put it back to sleep.' },
+      { who: 'null', text: 'If it doesn’t collect you first. The Polar Array is next. Mind your charge.' },
+    ],
+  },
+  {
+    id: 7,
+    code: 'SECTOR 08',
+    name: 'Polar Array',
+    tagline: 'Like repels like.',
+    boss: 'dynamo',
+    bossName: 'DYNAMO',
+    bossTitle: 'Warden of the Archive Grid',
+    bossHp: 300,
+    accent: '#60a5fa',
+    theme: { top: '#0a0614', bottom: '#1a0b2e', grid: '#60a5fa', nebula: ['#2563eb', '#e11d48', '#1e3a8a'] },
+    stageTime: 50,
+    wave: 7,
+    mix: { drone: 0.3, seeker: 0.2, spinner: 0.2, formation: 0.15, turret: 0.15 },
+    lasers: 'h',
+    parTime: 75,
+    reward: 360,
+    briefing: [
+      { who: 'iris', text: 'The Polar Array powers the Archive. Its Warden, DYNAMO, runs on two charges: BLUE and RED.' },
+      { who: 'iris', text: 'I rigged your ship to carry a charge too. Every Dash flips it.' },
+      { who: 'null', text: 'Bullets of your own colour can’t hurt you. They charge you instead. Soak them up.' },
+      { who: 'iris', text: 'And your shots only bite when you’re the OPPOSITE of its shell. Opposites attract.' },
+      { who: 'pilot', text: 'Match the bullets, oppose the shell, flip with a dash. Got it... I think.' },
+    ],
+    intel: [
+      'Your ship carries a charge, BLUE or RED. Every DASH flips it.',
+      'Enemy shots of YOUR colour are absorbed and fill FLUX. The other colour hurts.',
+      'Your shots only damage DYNAMO while its shell is the OPPOSITE colour. The shell flips often.',
+      'FLUX at 100% discharges into DYNAMO. A POLAR WALL can’t be dodged: match its colour.',
+    ],
+    bossIntro: [
+      { who: 'dynamo', text: 'POSITIVE. NEGATIVE. YOU ARE NEITHER. YOU ARE NOISE.' },
+      { who: 'iris', text: 'Watch the shell colour, and dash to flip yours!' },
+    ],
+    debrief: [
+      { who: 'iris', text: 'Second seal. Power to the Archive is dropping.' },
+      { who: 'null', text: 'Good. LEVIATHAN will feel that. It will start rewinding things to protect itself.' },
+      { who: 'pilot', text: 'Rewinding?' },
+      { who: 'null', text: 'The Clockwork Spire schedules every process down here. Its Warden can undo time. Your damage included.' },
+    ],
+  },
+  {
+    id: 8,
+    code: 'SECTOR 09',
+    name: 'Clockwork Spire',
+    tagline: 'Every second is borrowed.',
+    boss: 'chronos',
+    bossName: 'CHRONOS',
+    bossTitle: 'Warden of the Schedule',
+    bossHp: 320,
+    accent: '#fbbf24',
+    theme: { top: '#0c0a04', bottom: '#2a1d06', grid: '#fbbf24', nebula: ['#b45309', '#78350f', '#facc15'] },
+    stageTime: 50,
+    wave: 7,
+    mix: { drone: 0.25, seeker: 0.25, spinner: 0.2, formation: 0.15, turret: 0.15 },
+    lasers: 'both',
+    parTime: 85,
+    reward: 400,
+    briefing: [
+      { who: 'iris', text: 'CHRONOS keeps the Archive’s schedule. Every time its long hand reaches twelve, it rewinds.' },
+      { who: 'iris', text: 'Damage you deal is only borrowed time. When the clock strikes, it heals all of it back.' },
+      { who: 'null', text: 'Unless you break its PENDULUM. That stops the clock and locks your damage in, with interest.' },
+      { who: 'pilot', text: 'Hit it hard, then smash the pendulum before twelve.' },
+      { who: 'iris', text: 'And stay clear of the minute hand. It sweeps the whole sector. Dash through it if you must.' },
+    ],
+    intel: [
+      'Your damage is UNBANKED. When the minute hand reaches XII, CHRONOS rewinds it.',
+      'Break the swinging PENDULUM (shoot it or dash it) to bank everything +50% and stop the clock.',
+      'While the clock is stopped, every hit is permanent.',
+      'The minute hand is lethal: dash through it. TIME STOP freezes bullets, then flings them at you.',
+    ],
+    bossIntro: [
+      { who: 'chronos', text: 'YOUR TIME IS UP. IT ALWAYS WAS.' },
+      { who: 'iris', text: 'Damage it, then break the pendulum before twelve!' },
+    ],
+    debrief: [
+      { who: 'iris', text: 'Seal three. The clock is finally quiet.' },
+      { who: 'null', text: 'LEVIATHAN is fully awake now. It is pulling the Archive’s index tree up around itself.' },
+      { who: 'iris', text: 'The Root Tangle. Every branch you cut grows back twice.' },
+      { who: 'pilot', text: 'Then I won’t just cut. I’ll burn.' },
+    ],
+  },
+  {
+    id: 9,
+    code: 'SECTOR 10',
+    name: 'Root Tangle',
+    tagline: 'Cut one. Two more remember.',
+    boss: 'hydra',
+    bossName: 'HYDRA',
+    bossTitle: 'Warden of the Index',
+    bossHp: 300,
+    accent: '#4ade80',
+    theme: { top: '#020a05', bottom: '#062014', grid: '#4ade80', nebula: ['#15803d', '#065f46', '#84cc16'] },
+    stageTime: 52,
+    wave: 8,
+    mix: { drone: 0.25, seeker: 0.3, spinner: 0.15, formation: 0.15, turret: 0.15 },
+    lasers: 'v',
+    parTime: 90,
+    reward: 440,
+    briefing: [
+      { who: 'iris', text: 'HYDRA is the Archive’s index. Every head is a pointer, and pointers regrow.' },
+      { who: 'iris', text: 'Shoot a head off and you have a few seconds before TWO heads grow out of the stump.' },
+      { who: 'null', text: 'Dash straight through the stump to cauterize it. A sealed pointer stays dead.' },
+      { who: 'iris', text: 'Clear every head and its core is exposed. That is your window.' },
+      { who: 'pilot', text: 'Cut, burn, shoot. Repeat.' },
+    ],
+    intel: [
+      'Shoot a HEAD to sever it. The stump splits into TWO heads a few seconds later.',
+      'DASH through a stump to CAUTERIZE it for good. That also hurts the body.',
+      'No heads left = CORE EXPOSED. Pour fire into it before new heads sprout.',
+      'Heads lunge at the reticle. An EMP cauterizes every open stump.',
+    ],
+    bossIntro: [
+      { who: 'hydra', text: 'CUT US. WE ONLY MULTIPLY.' },
+      { who: 'iris', text: 'Sever a head, then dash the stump!' },
+    ],
+    debrief: [
+      { who: 'iris', text: 'Fourth seal. That’s all of them.' },
+      { who: 'null', text: 'Then we go down. All the way. LEVIATHAN is in the Deep Archive, eating whole sectors.' },
+      { who: 'pilot', text: 'Any advice?' },
+      { who: 'null', text: 'Its body is armour. Its tail is not. And if it ever coils around you... cut your way out.' },
+    ],
+  },
+  {
+    id: 10,
+    code: 'SECTOR 11',
+    name: 'The Deep Archive',
+    tagline: 'Everything unreferenced is freed.',
+    boss: 'leviathan',
+    bossName: 'LEVIATHAN',
+    bossTitle: 'The Garbage Collector',
+    bossHp: 360,
+    accent: '#2dd4bf',
+    theme: { top: '#00060a', bottom: '#04202a', grid: '#2dd4bf', nebula: ['#0f766e', '#164e63', '#14b8a6'] },
+    stageTime: 55,
+    wave: 8,
+    mix: { drone: 0.25, seeker: 0.25, spinner: 0.2, formation: 0.15, turret: 0.15 },
+    lasers: 'both',
+    parTime: 110,
+    reward: 600,
+    briefing: [
+      { who: 'iris', text: 'This is the bottom of the Grid. LEVIATHAN is down here, and it is enormous.' },
+      { who: 'iris', text: 'Its scales shrug off shots. Only the glowing TAIL is soft. Every tail segment you destroy shortens it.' },
+      { who: 'null', text: 'When it coils around you, don’t panic. Dash through its body and you sever everything around the cut.' },
+      { who: 'iris', text: 'Strip it down to a few segments and its head cracks open. Then we seal it for good.' },
+      { who: 'pilot', text: 'Four seals, one worm. Let’s go.' },
+    ],
+    intel: [
+      'The body is armoured. Shoot the glowing TAIL to destroy it segment by segment.',
+      'DASH through any body segment to SEVER five segments at once.',
+      'COIL: it circles you and tightens. Dash through it, it’s also your best opening.',
+      'Down to 3 segments, the HEAD cracks open: finish it. Get off the red line when it charges.',
+    ],
+    bossIntro: [
+      { who: 'leviathan', text: 'UNREFERENCED. UNNEEDED. COLLECTING.' },
+      { who: 'iris', text: 'Shoot the tail, and sever it when it coils!' },
+    ],
+    debrief: [
+      { who: 'leviathan', text: 'collection... suspended... the Grid... is referenced...' },
+      { who: 'iris', text: 'Four seals locked. LEVIATHAN is asleep. For real this time.' },
+      { who: 'null', text: 'It was never evil, you know. Just doing its job too well. Like me.' },
+      { who: 'iris', text: 'Then you both get second chances. Welcome home, version zero.' },
+      { who: 'pilot', text: 'The Grid, the Archive and a couple of reformed glitches. Not a bad week.' },
     ],
   },
 ];

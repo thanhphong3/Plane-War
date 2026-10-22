@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChevronRight, KeyRound, Lock, Skull, Star, X } from 'lucide-react';
-import { LEVELS } from '../game/campaign';
+import { ACT_II_START, LEVELS } from '../game/campaign';
 import { tr } from '../i18n';
 import { localLevel } from '../i18n/content';
 import { SaveData } from '../types/game';
@@ -31,6 +31,7 @@ export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onCl
   useEscape(isOpen, onClose);
   if (!isOpen) return null;
   const keys = LEVELS.slice(0, 5).filter((l) => (saveData.campaignStars[l.id] || 0) > 0).length;
+  const seals = LEVELS.slice(ACT_II_START, ACT_II_START + 4).filter((l) => (saveData.campaignStars[l.id] || 0) > 0).length;
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-md anim-fade">
@@ -40,7 +41,7 @@ export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onCl
             <p className="text-[10px] uppercase tracking-[0.3em] text-rose-300 font-bold font-cyber">{tr('Campaign', 'Chiến dịch')}</p>
             <h2 className="text-2xl font-black text-white font-cyber tracking-wide leading-none mt-0.5">GRIDFALL</h2>
             <p className="text-xs text-slate-400 mt-1">
-              {tr('Recover the Root Keys. Reach the Core. Reboot NULL.', 'Thu hồi Khóa Gốc. Tiến vào Lõi. Khởi động lại NULL.')}
+              {tr('Reboot NULL. Then seal the Deep Archive.', 'Khởi động lại NULL. Rồi niêm phong Kho Lưu Trữ Sâu.')}
             </p>
           </div>
           <button
@@ -77,7 +78,23 @@ export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onCl
               const current = !locked && stars === 0;
               return (
                 <li key={lvl.id} className="relative">
-                  {i < LEVELS.length - 1 && (
+                  {i === ACT_II_START && (
+                    <div className="flex items-center justify-between gap-2 pt-2 pb-2.5 pl-1">
+                      <span className="text-[10px] font-black tracking-[0.25em] font-cyber text-teal-300">
+                        {tr('ACT II · DEEP ARCHIVE', 'HỒI II · KHO LƯU TRỮ SÂU')}
+                      </span>
+                      <span className="flex items-center gap-1 text-[10px] font-bold text-teal-200">
+                        {tr('Seals', 'Ấn')}
+                        {[0, 1, 2, 3].map((k) => (
+                          <span
+                            key={k}
+                            className={`w-3 h-1.5 rounded-full ${k < seals ? 'bg-teal-300 shadow shadow-teal-400/60' : 'bg-slate-700'}`}
+                          />
+                        ))}
+                      </span>
+                    </div>
+                  )}
+                  {i < LEVELS.length - 1 && i !== ACT_II_START - 1 && (
                     <span
                       className="absolute left-[22px] top-12 w-[2px] h-[calc(100%-1.5rem)]"
                       style={{ background: locked ? '#1e293b' : `linear-gradient(${lvl.accent}, ${LEVELS[i + 1].accent})` }}

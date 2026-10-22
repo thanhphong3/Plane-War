@@ -120,7 +120,7 @@ export function renderScene(
     const target = e.hazards.find((h) => h.id === e.dashHintId);
     if (target) drawDashHint(ctx, target, t);
   }
-  if (e.boss) drawBossEntity(ctx, e.boss, t, p.x, p.y, W);
+  if (e.boss) drawBossEntity(ctx, e.boss, t, p.x, p.y, W, H, ship.id);
   for (const h of e.hazards) if (h.type === 'shot') drawHazard(ctx, h, t, p.x, p.y);
 
   // Holo Echo decoys: flickering ghost ships that soak up fire, pulsing faster before they blow

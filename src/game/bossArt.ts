@@ -1,6 +1,7 @@
 import { BossEntity, BossPart } from '../types/game';
-import { TWIN_NAMES } from './bosses';
-import { drawBoss, drawGlow, fxPrefs, hexToRgba } from './render';
+import { tr } from '../i18n';
+import { MIRROR_ABSORB, TWIN_NAMES, leviMode, polColor } from './bosses';
+import { drawBoss, drawGlow, drawShip, fxPrefs, hexToRgba } from './render';
 
 type Ctx = CanvasRenderingContext2D;
 const TAU = Math.PI * 2;
@@ -662,8 +663,598 @@ function drawNull(ctx: Ctx, b: BossEntity, t: number, W: number) {
   if (b.v.trans > 0) drawGlow(ctx, b.x, b.y, b.r * 2, '#ffffff', b.v.trans * 0.4);
 }
 
+const POL_A = '#60a5fa';
+const POL_B = '#f43f5e';
+const LEVI_ART = '#2dd4bf';
+
 // ---------------------------------------------------------------------------
-export function drawBossEntity(ctx: Ctx, b: BossEntity, t: number, px: number, py: number, W: number) {
+// MIMIC
+// ---------------------------------------------------------------------------
+function drawMirrorMine(ctx: Ctx, m: BossPart, t: number) {
+  const arming = m.timer > 0;
+  const a = arming ? (fxPrefs.reduceFlash ? 0.45 : 0.25 + Math.abs(Math.sin(t * 14)) * 0.4) : 1;
+  ctx.save();
+  ctx.globalAlpha = a;
+  drawGlow(ctx, m.x, m.y, m.r * 2.6, '#f43f5e', arming ? 0.3 : 0.6);
+  ctx.translate(m.x, m.y);
+  ctx.rotate(t * 1.5 + (m.a || 0));
+  // Spiked hexagon of mirror glass
+  ctx.beginPath();
+  for (let i = 0; i < 12; i++) {
+    const rr = i % 2 ? m.r * 0.72 : m.r * 1.15;
+    const ang = (i / 12) * TAU;
+    if (i === 0) ctx.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+    else ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+  }
+  ctx.closePath();
+  const g = ctx.createLinearGradient(-m.r, -m.r, m.r, m.r);
+  g.addColorStop(0, '#f8fafc');
+  g.addColorStop(0.5, '#64748b');
+  g.addColorStop(1, '#e2e8f0');
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = '#f43f5e';
+  circle(ctx, 0, 0, m.r * 0.3);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawMimic(ctx: Ctx, b: BossEntity, t: number, px: number, py: number, shipId: string) {
+  // The reflection line: a faint thread through the mirror point
+  ctx.save();
+  ctx.strokeStyle = 'rgba(226,232,240,0.14)';
+  ctx.setLineDash([3, 9]);
+  ctx.lineDashOffset = -t * 20;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(px, py);
+  ctx.lineTo(b.x, b.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  for (const m of b.parts) drawMirrorMine(ctx, m, t);
+
+  const frozen = b.v.freeze > 0;
+  drawGlow(ctx, b.x, b.y, b.r * 2.8, frozen ? '#7dd3fc' : '#cbd5e1', 0.55);
+  // Shimmering glass halo
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.strokeStyle = hexToRgba(frozen ? '#7dd3fc' : '#f8fafc', 0.45);
+  ctx.lineWidth = 2;
+  ctx.setLineDash([10, 6]);
+  ctx.lineDashOffset = t * 40;
+  circle(ctx, 0, 0, b.r * 1.15);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // Absorbed-shots gauge: fills up before it fires your bullets back
+  const fill = b.v.absorbed / MIRROR_ABSORB;
+  if (fill > 0) {
+    ctx.strokeStyle = fill > 0.6 ? '#f43f5e' : '#cbd5e1';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, b.r * 1.35, -Math.PI / 2, -Math.PI / 2 + TAU * fill);
+    ctx.stroke();
+  }
+  // Your own hull, flipped to face you
+  ctx.rotate(Math.PI);
+  drawShip(ctx, shipId, b.r * 0.78, b.hitFlash > 0 ? '#ffffff' : frozen ? '#7dd3fc' : '#e2e8f0', '#475569', t, 0.8);
+  ctx.restore();
+  if (frozen) {
+    // Ice cracks
+    ctx.save();
+    ctx.strokeStyle = 'rgba(224,242,254,0.85)';
+    ctx.lineWidth = 1.5;
+    for (let k = 0; k < 5; k++) {
+      const a = k * 1.25 + 0.4;
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(b.x + Math.cos(a) * b.r * 0.6, b.y + Math.sin(a) * b.r * 0.6);
+      ctx.lineTo(b.x + Math.cos(a + 0.35) * b.r, b.y + Math.sin(a + 0.35) * b.r);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// DYNAMO
+// ---------------------------------------------------------------------------
+function polGlyph(ctx: Ctx, x: number, y: number, pol: number, size: number) {
+  ctx.save();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = Math.max(2, size * 0.22);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x - size / 2, y);
+  ctx.lineTo(x + size / 2, y);
+  if (pol > 0) {
+    ctx.moveTo(x, y - size / 2);
+    ctx.lineTo(x, y + size / 2);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawDynamo(ctx: Ctx, b: BossEntity, t: number, px: number, py: number) {
+  const shell = polColor(b.v.bp);
+  const other = polColor(-b.v.bp);
+  const warn = b.v.warned && !fxPrefs.reduceFlash && Math.sin(t * 24) > 0;
+  const col = warn ? other : shell;
+
+  // Field lines arcing between the poles
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < 4; k++) {
+    const w = b.r * (1.6 + k * 0.45);
+    ctx.strokeStyle = hexToRgba(k % 2 ? POL_A : POL_B, 0.22);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(b.x, b.y, w, w * 0.42, Math.sin(t * 0.6 + k) * 0.25, 0, TAU);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  drawGlow(ctx, b.x, b.y, b.r * 3, col, 0.6);
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  // Spinning armature coils
+  ctx.save();
+  ctx.rotate(b.angle);
+  for (let i = 0; i < 6; i++) {
+    ctx.rotate(TAU / 6);
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(b.r * 0.55, -b.r * 0.16, b.r * 0.5, b.r * 0.32);
+    ctx.strokeStyle = hexToRgba(col, 0.9);
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(b.r * 0.55, -b.r * 0.16, b.r * 0.5, b.r * 0.32);
+    for (let w = 0; w < 4; w++) {
+      ctx.beginPath();
+      ctx.moveTo(b.r * (0.62 + w * 0.11), -b.r * 0.16);
+      ctx.lineTo(b.r * (0.62 + w * 0.11), b.r * 0.16);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+  // Core sphere in the shell's charge
+  const g = ctx.createRadialGradient(-b.r * 0.2, -b.r * 0.2, 2, 0, 0, b.r * 0.62);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.4, col);
+  g.addColorStop(1, '#020617');
+  ctx.fillStyle = g;
+  circle(ctx, 0, 0, b.r * 0.6);
+  ctx.fill();
+  // Tint, don't replace: under constant fire the shell colour must stay readable
+  if (b.hitFlash > 0) {
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fill();
+  }
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  circle(ctx, 0, 0, b.r * 0.6);
+  ctx.stroke();
+  ctx.restore();
+  polGlyph(ctx, b.x, b.y, b.v.bp, b.r * 0.5);
+
+  // The pilot's own charge, plus the FLUX gauge around it
+  const pc = polColor(b.v.pp);
+  drawGlow(ctx, px, py, 46, pc, 0.35);
+  ctx.save();
+  ctx.strokeStyle = pc;
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([6, 5]);
+  ctx.lineDashOffset = -t * 30 * b.v.pp;
+  circle(ctx, px, py, 30);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  if (b.v.flux > 0) {
+    ctx.strokeStyle = '#fde047';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.arc(px, py, 36, -Math.PI / 2, -Math.PI / 2 + TAU * (b.v.flux / 100));
+    ctx.stroke();
+  }
+  ctx.restore();
+  polGlyph(ctx, px + 24, py - 24, b.v.pp, 9);
+}
+
+// ---------------------------------------------------------------------------
+// CHRONOS
+// ---------------------------------------------------------------------------
+function drawChronos(ctx: Ctx, b: BossEntity, t: number, W: number, H: number) {
+  const gold = '#fbbf24';
+  const stopped = b.v.stopped > 0;
+  // Time Stop: the world drains to sepia
+  if (b.v.ts > 0) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(120, 83, 15, 0.16)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  // Pendulum
+  const bob = b.parts[0];
+  ctx.save();
+  ctx.strokeStyle = hexToRgba('#d97706', bob.alive ? 0.9 : 0.3);
+  ctx.lineWidth = 3;
+  if (!bob.alive) ctx.setLineDash([5, 7]);
+  ctx.beginPath();
+  ctx.moveTo(b.x, b.y);
+  ctx.lineTo(bob.x, bob.y);
+  ctx.stroke();
+  ctx.restore();
+  if (bob.alive) {
+    drawGlow(ctx, bob.x, bob.y, bob.r * 2.8, gold, 0.75);
+    const bg = ctx.createRadialGradient(bob.x - 5, bob.y - 5, 2, bob.x, bob.y, bob.r);
+    bg.addColorStop(0, '#fffbeb');
+    bg.addColorStop(0.5, gold);
+    bg.addColorStop(1, '#78350f');
+    ctx.fillStyle = bob.hitFlash > 0 ? '#ffffff' : bg;
+    circle(ctx, bob.x, bob.y, bob.r);
+    ctx.fill();
+    ctx.strokeStyle = '#fffbeb';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(bob.x, bob.y, bob.r + 6, -Math.PI / 2, -Math.PI / 2 + TAU * Math.max(0, bob.hp / bob.maxHp));
+    ctx.stroke();
+  } else {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(253,230,138,0.5)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 6]);
+    circle(ctx, bob.x, bob.y, bob.r);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  drawGlow(ctx, b.x, b.y, b.r * 3, stopped ? '#94a3b8' : gold, 0.5);
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  // Gears behind the face
+  for (const [gx, gy, gr, dir] of [
+    [-b.r * 0.85, -b.r * 0.6, b.r * 0.5, 1],
+    [b.r * 0.9, -b.r * 0.45, b.r * 0.42, -1],
+  ]) {
+    ctx.save();
+    ctx.translate(gx, gy);
+    ctx.rotate(b.angle * 2 * dir);
+    ctx.beginPath();
+    for (let i = 0; i < 20; i++) {
+      const rr = i % 2 ? gr * 0.8 : gr;
+      ctx.arc(0, 0, rr, (i / 20) * TAU, ((i + 1) / 20) * TAU);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#292524';
+    ctx.fill();
+    ctx.strokeStyle = '#b45309';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+  // Clock face
+  const fg = ctx.createRadialGradient(0, 0, 2, 0, 0, b.r);
+  fg.addColorStop(0, b.hitFlash > 0 ? '#ffffff' : '#fffbeb');
+  fg.addColorStop(0.75, '#fde68a');
+  fg.addColorStop(1, '#92400e');
+  ctx.fillStyle = fg;
+  circle(ctx, 0, 0, b.r * 0.9);
+  ctx.fill();
+  ctx.strokeStyle = gold;
+  ctx.lineWidth = 4;
+  circle(ctx, 0, 0, b.r * 0.9);
+  ctx.stroke();
+  ctx.strokeStyle = '#451a03';
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * TAU;
+    ctx.lineWidth = i % 3 ? 1.5 : 3.5;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * b.r * 0.72, Math.sin(a) * b.r * 0.72);
+    ctx.lineTo(Math.cos(a) * b.r * 0.84, Math.sin(a) * b.r * 0.84);
+    ctx.stroke();
+  }
+  ctx.font = "900 11px 'Orbitron', sans-serif";
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#7c2d12';
+  ctx.fillText('XII', 0, -b.r * 0.55);
+  // Hour hand (cosmetic)
+  ctx.strokeStyle = '#451a03';
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  const hh = -Math.PI / 2 + b.v.hand / 12 + b.t * 0.05;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(Math.cos(hh) * b.r * 0.45, Math.sin(hh) * b.r * 0.45);
+  ctx.stroke();
+  // Unbanked damage: a red arc eating into the rim
+  const pend = Math.min(1, b.v.pending / (b.maxHp * 0.25));
+  if (pend > 0) {
+    ctx.strokeStyle = '#f43f5e';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(0, 0, b.r * 1.08, -Math.PI / 2, -Math.PI / 2 + TAU * pend);
+    ctx.stroke();
+  }
+  if (stopped) {
+    ctx.fillStyle = '#334155';
+    ctx.fillRect(-9, -b.r * 0.2, 6, b.r * 0.4);
+    ctx.fillRect(3, -b.r * 0.2, 6, b.r * 0.4);
+  }
+  ctx.restore();
+
+  // Rewind swirl
+  if (b.v.rewindFx > 0) {
+    ctx.save();
+    ctx.strokeStyle = hexToRgba('#fde68a', Math.min(1, b.v.rewindFx));
+    ctx.lineWidth = 2;
+    for (let k = 0; k < 3; k++) {
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r * (1.3 + k * 0.4), -t * 8 + k, -t * 8 + k + 2.2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // The minute hand — lethal, sweeping the whole sector
+  const ha = -Math.PI / 2 + b.v.hand;
+  const L = b.v.handL || 300;
+  const sx = b.x + Math.cos(ha) * b.r;
+  const sy = b.y + Math.sin(ha) * b.r;
+  const ex = b.x + Math.cos(ha) * L;
+  const ey = b.y + Math.sin(ha) * L;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = hexToRgba('#f97316', 0.3);
+  ctx.lineWidth = 16;
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(ex, ey);
+  ctx.stroke();
+  ctx.strokeStyle = stopped ? '#cbd5e1' : '#fde68a';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(ex, ey);
+  ctx.stroke();
+  ctx.restore();
+  drawGlow(ctx, ex, ey, 22, '#f97316', 0.9);
+}
+
+// ---------------------------------------------------------------------------
+// HYDRA
+// ---------------------------------------------------------------------------
+function drawHydra(ctx: Ctx, b: BossEntity, t: number, px: number, py: number) {
+  const exposed = b.v.exposed > 0;
+  // Necks (behind everything)
+  for (const pt of b.parts) {
+    const mx = (b.x + pt.x) / 2 + Math.sin(t * 2 + (pt.a || 0) * 3) * 14;
+    const my = (b.y + pt.y) / 2 + 18;
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (const [w, c] of [
+      [pt.alive ? 18 : 14, '#052e16'],
+      [pt.alive ? 12 : 9, pt.alive ? '#16a34a' : '#7c2d12'],
+    ] as const) {
+      ctx.strokeStyle = c;
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.quadraticCurveTo(mx, my, pt.x, pt.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Body
+  drawGlow(ctx, b.x, b.y, b.r * 2.8, exposed ? '#bef264' : '#16a34a', exposed ? 0.8 : 0.45);
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  if (exposed) {
+    const g = ctx.createRadialGradient(0, 0, 2, 0, 0, b.r * 0.85);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.4, '#bef264');
+    g.addColorStop(1, '#14532d');
+    ctx.fillStyle = b.hitFlash > 0 ? '#ffffff' : g;
+    circle(ctx, 0, 0, b.r * 0.8 * (1 + Math.sin(t * 10) * 0.05));
+    ctx.fill();
+  }
+  // Bark plates (peeled open while exposed)
+  for (let i = 0; i < 7; i++) {
+    ctx.save();
+    ctx.rotate((i / 7) * TAU + b.angle * 0.2);
+    ctx.translate(exposed ? b.r * 0.35 : 0, 0);
+    ctx.beginPath();
+    ctx.moveTo(b.r * 0.2, -b.r * 0.45);
+    ctx.quadraticCurveTo(b.r * 1.05, 0, b.r * 0.2, b.r * 0.45);
+    ctx.closePath();
+    ctx.fillStyle = b.hitFlash > 0 && !exposed ? '#3f6212' : '#14532d';
+    ctx.fill();
+    ctx.strokeStyle = '#4ade80';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+
+  for (const pt of b.parts) {
+    if (!pt.alive) {
+      // Burning stump with a split countdown
+      drawGlow(ctx, pt.x, pt.y, 30 + Math.random() * 6, '#f97316', 0.85);
+      ctx.save();
+      ctx.fillStyle = '#7c2d12';
+      circle(ctx, pt.x, pt.y, 10);
+      ctx.fill();
+      ctx.strokeStyle = '#fde047';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 20, -Math.PI / 2, -Math.PI / 2 + TAU * Math.max(0, pt.timer / 3.6));
+      ctx.stroke();
+      ctx.restore();
+      label(ctx, tr('DASH!', 'LƯỚT!'), pt.x, pt.y + 32, '#fde047');
+      continue;
+    }
+    // Bite telegraph
+    if (pt.real && pt.timer < 0.6) {
+      const blink = fxPrefs.reduceFlash ? 0.85 : Math.sin(t * 30) > 0 ? 1 : 0.4;
+      ctx.save();
+      ctx.globalAlpha = blink;
+      drawReticle(ctx, pt.tx, pt.ty, 24, '#bef264', t);
+      ctx.restore();
+    }
+    const face = Math.atan2(py - pt.y, px - pt.x);
+    const jaw = pt.real ? 0.45 : 0.12 + Math.sin(t * 6 + (pt.a || 0)) * 0.06;
+    drawGlow(ctx, pt.x, pt.y, pt.r * 2.2, '#22c55e', 0.5);
+    ctx.save();
+    ctx.translate(pt.x, pt.y);
+    ctx.rotate(face);
+    const r = pt.r;
+    for (const s of [-1, 1]) {
+      ctx.save();
+      ctx.rotate(s * jaw);
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.8, 0);
+      ctx.quadraticCurveTo(-r * 0.2, s * r * 0.95, r * 1.3, s * r * 0.15);
+      ctx.lineTo(r * 0.2, 0);
+      ctx.closePath();
+      ctx.fillStyle = pt.hitFlash > 0 ? '#ffffff' : '#15803d';
+      ctx.fill();
+      ctx.strokeStyle = '#86efac';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+    for (const s of [-1, 1]) {
+      drawGlow(ctx, r * 0.15, s * r * 0.38, 7, '#fde047', 0.95);
+    }
+    ctx.restore();
+    // HP sliver
+    ctx.fillStyle = 'rgba(2,6,23,0.8)';
+    ctx.fillRect(pt.x - 14, pt.y + pt.r + 6, 28, 3);
+    ctx.fillStyle = '#86efac';
+    ctx.fillRect(pt.x - 14, pt.y + pt.r + 6, 28 * Math.max(0, pt.hp / pt.maxHp), 3);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// LEVIATHAN
+// ---------------------------------------------------------------------------
+function drawLeviathan(ctx: Ctx, b: BossEntity, t: number) {
+  const phase2 = b.phase === 2;
+  const mode = leviMode(b);
+  if (mode === 'charge' && b.v.modeT < 0.9) {
+    const blink = fxPrefs.reduceFlash ? 0.7 : 0.4 + Math.abs(Math.sin(t * 18)) * 0.5;
+    ctx.save();
+    ctx.strokeStyle = hexToRgba('#f43f5e', blink);
+    ctx.lineWidth = 3;
+    ctx.setLineDash([14, 10]);
+    ctx.lineDashOffset = -t * 120;
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(b.x + Math.cos(b.v.hd) * 1200, b.y + Math.sin(b.v.hd) * 1200);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Body, tail first so the head sits on top
+  const n = b.parts.length;
+  for (let i = n - 1; i >= 0; i--) {
+    const s = b.parts[i];
+    const tail = i === n - 1;
+    const prev = i === 0 ? { x: b.x, y: b.y } : b.parts[i - 1];
+    const a = Math.atan2(prev.y - s.y, prev.x - s.x);
+    if (tail) drawGlow(ctx, s.x, s.y, s.r * 3, '#fbbf24', 0.8 + Math.sin(t * 8) * 0.15);
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate(a);
+    // Fins
+    ctx.fillStyle = hexToRgba(LEVI_ART, 0.5);
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(-s.r * 0.3, side * s.r * 0.7);
+      ctx.lineTo(-s.r * 1.1, side * s.r * (1.35 + Math.sin(t * 5 + i) * 0.15));
+      ctx.lineTo(s.r * 0.3, side * s.r * 0.75);
+      ctx.closePath();
+      ctx.fill();
+    }
+    polygon(ctx, 6, s.r, Math.PI / 6);
+    const g = ctx.createLinearGradient(0, -s.r, 0, s.r);
+    g.addColorStop(0, tail ? '#fde68a' : '#134e4a');
+    g.addColorStop(1, tail ? '#b45309' : '#042f2e');
+    ctx.fillStyle = s.hitFlash > 0 ? '#ffffff' : g;
+    ctx.fill();
+    ctx.strokeStyle = tail ? '#fde047' : LEVI_ART;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+    if (tail) {
+      ctx.strokeStyle = '#fde047';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r + 6, -Math.PI / 2, -Math.PI / 2 + TAU * Math.max(0, s.hp / s.maxHp));
+      ctx.stroke();
+    } else {
+      drawGlow(ctx, s.x, s.y, 5, '#5eead4', 0.8);
+    }
+  }
+
+  // Head
+  drawGlow(ctx, b.x, b.y, b.r * 2.6, phase2 ? '#f43f5e' : LEVI_ART, 0.6);
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.rotate(b.v.hd || 0);
+  const r = b.r;
+  const jaw = mode === 'charge' ? 0.5 : 0.15 + Math.sin(t * 4) * 0.08;
+  for (const s of [-1, 1]) {
+    ctx.save();
+    ctx.rotate(s * jaw);
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.9, s * r * 0.15);
+    ctx.quadraticCurveTo(-r * 0.3, s * r * 1.05, r * 1.45, s * r * 0.12);
+    ctx.lineTo(r * 0.2, 0);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(-r, 0, r, 0);
+    g.addColorStop(0, '#042f2e');
+    g.addColorStop(1, b.hitFlash > 0 ? '#ffffff' : '#0f766e');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = '#5eead4';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Teeth
+    ctx.fillStyle = '#ccfbf1';
+    for (let k = 0; k < 4; k++) {
+      const x = r * (0.3 + k * 0.25);
+      ctx.beginPath();
+      ctx.moveTo(x, s * r * 0.12);
+      ctx.lineTo(x + r * 0.08, s * r * 0.02);
+      ctx.lineTo(x + r * 0.16, s * r * 0.12);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  for (const s of [-1, 1]) drawGlow(ctx, -r * 0.1, s * r * 0.45, 9, phase2 ? '#f43f5e' : '#fde047', 1);
+  if (phase2) {
+    // Cracked armour leaking light
+    ctx.strokeStyle = 'rgba(253,164,175,0.9)';
+    ctx.lineWidth = 1.5;
+    for (let k = 0; k < 4; k++) {
+      const a = k * 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.3, 0);
+      ctx.lineTo(-r * 0.3 + Math.cos(a) * r * 0.5, Math.sin(a) * r * 0.5);
+      ctx.lineTo(-r * 0.3 + Math.cos(a + 0.4) * r * 0.8, Math.sin(a + 0.4) * r * 0.8);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+export function drawBossEntity(ctx: Ctx, b: BossEntity, t: number, px: number, py: number, W: number, H: number, shipId: string) {
   switch (b.kind) {
     case 'gatekeeper':
       drawGatekeeper(ctx, b, t);
@@ -682,6 +1273,21 @@ export function drawBossEntity(ctx: Ctx, b: BossEntity, t: number, px: number, p
       break;
     case 'null':
       drawNull(ctx, b, t, W);
+      break;
+    case 'mimic':
+      drawMimic(ctx, b, t, px, py, shipId);
+      break;
+    case 'dynamo':
+      drawDynamo(ctx, b, t, px, py);
+      break;
+    case 'chronos':
+      drawChronos(ctx, b, t, W, H);
+      break;
+    case 'hydra':
+      drawHydra(ctx, b, t, px, py);
+      break;
+    case 'leviathan':
+      drawLeviathan(ctx, b, t);
       break;
     default:
       drawBoss(ctx, b, t);

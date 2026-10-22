@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Sparkles } from 'lucide-react';
 import { BOSSES, BossApi, ShotOpts } from '../game/bosses';
-import { LEVELS, LevelDef, SpeakerId, computeStars } from '../game/campaign';
+import { LEVELS, LevelDef, SpeakerId, computeStars, isActFinale } from '../game/campaign';
 import { EngineState, ScoreSource, addScore, createEngineState, emptyScoreBy, fieldScale } from '../game/engine';
 import { HudSnapshot, HudStore, createHudStore } from '../game/hudStore';
 import {
@@ -869,6 +869,7 @@ export const NeonGame: React.FC = () => {
       ay: opts?.ay,
       ghost: opts?.ghost,
       glitch: opts?.glitch ? 0.45 + Math.random() * 0.3 : undefined,
+      pol: opts?.pol,
     });
   }, []);
 
@@ -3560,7 +3561,7 @@ export const NeonGame: React.FC = () => {
           key={`${levelIndex}-${storyKind}`}
           level={localLevel(LEVELS[levelIndex])}
           kind={storyKind}
-          isFinal={levelIndex === LEVELS.length - 1}
+          isFinal={isActFinale(levelIndex)}
           onDone={onStoryDone}
           onBack={returnToMainMenu}
         />

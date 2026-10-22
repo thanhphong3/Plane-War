@@ -579,7 +579,8 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     // Ghost shots fade almost out of sight, then flare back
     const a = h.ghost ? 0.12 + 0.88 * Math.abs(Math.sin(t * 2.6 + h.id * 0.7)) : 1;
     // Proximity alarm: the closer it gets to the pilot, the redder it burns
-    if (near > 0) drawGlow(ctx, h.x, h.y, h.r * (3 + near * 2.5), DANGER, 0.6 * near);
+    // (polarity shots skip it: half of them are harmless, their colour is the warning)
+    if (near > 0 && !h.pol) drawGlow(ctx, h.x, h.y, h.r * (3 + near * 2.5), DANGER, 0.6 * near);
     drawGlow(ctx, h.x, h.y, h.r * 3, h.color, 0.8 * a);
     ctx.fillStyle = hexToRgba(h.color, a);
     ctx.beginPath();
@@ -590,11 +591,26 @@ export function drawHazard(ctx: Ctx, h: HazardEntity, t: number, px: number, py:
     ctx.arc(h.x, h.y, h.r * 0.42, 0, Math.PI * 2);
     ctx.fill();
     // Universal danger rim — stays faintly visible even on ghost shots, so they're fair
-    ctx.strokeStyle = hexToRgba(DANGER, Math.max(0.35, a));
+    ctx.strokeStyle = h.pol ? h.color : hexToRgba(DANGER, Math.max(0.35, a));
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(h.x, h.y, h.r * 0.95, 0, Math.PI * 2);
     ctx.stroke();
+    if (h.pol) {
+      // Blue = hollow diamond, red = solid square: readable without colour vision
+      ctx.save();
+      ctx.translate(h.x, h.y);
+      ctx.rotate(Math.PI / 4);
+      const s = h.r * 1.5;
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#ffffff';
+      if (h.pol > 0) ctx.strokeRect(-s / 2, -s / 2, s, s);
+      else {
+        ctx.fillStyle = hexToRgba(h.color, 0.55);
+        ctx.fillRect(-s / 2, -s / 2, s, s);
+      }
+      ctx.restore();
+    }
     if (h.glitch !== undefined) {
       ctx.strokeStyle = hexToRgba(h.color, 0.8);
       ctx.lineWidth = 1.5;

@@ -66,7 +66,19 @@ export interface GameSettings {
   haptics: boolean;
 }
 
-export type BossKind = 'sentinel' | 'gatekeeper' | 'twins' | 'furnace' | 'wraith' | 'singularity' | 'null';
+export type BossKind =
+  | 'sentinel'
+  | 'gatekeeper'
+  | 'twins'
+  | 'furnace'
+  | 'wraith'
+  | 'singularity'
+  | 'null'
+  | 'mimic'
+  | 'dynamo'
+  | 'chronos'
+  | 'hydra'
+  | 'leviathan';
 
 export interface ShipDef {
   id: string;
@@ -245,6 +257,8 @@ export interface HazardEntity {
   fuse?: number;
   /** Orb: deflected back towards the boss by the player. */
   reflected?: boolean;
+  /** Polarity shot (DYNAMO): 1 = blue, -1 = red. */
+  pol?: number;
 }
 
 export interface LaserEntity {
@@ -271,6 +285,8 @@ export interface BossPart {
   timer: number;
   hitFlash: number;
   real?: boolean;
+  /** Free angle (anchor / heading) for bosses whose parts need one. */
+  a?: number;
 }
 
 export interface BossEntity {

@@ -9,6 +9,7 @@ import {
   ShipDef,
   UpgradeDef,
 } from '../types/game';
+import { LEVELS } from '../game/campaign';
 
 export const STORAGE_KEY = 'neon_blitz_save_v2';
 
@@ -503,7 +504,15 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     desc: 'Earn 3 stars on every campaign sector.',
     icon: 'sparkles',
     rewardShards: 800,
-    isEligible: (s) => s.campaignStars.filter((n) => n >= 3).length >= 6,
+    isEligible: (s) => s.campaignStars.filter((n) => n >= 3).length >= LEVELS.length,
+  },
+  {
+    id: 'archive_clear',
+    title: 'Deep Sleep',
+    desc: 'Seal LEVIATHAN and finish Act II of the campaign.',
+    icon: 'crown',
+    rewardShards: 700,
+    isEligible: (s) => (s.campaignStars[LEVELS.length - 1] || 0) > 0,
   },
   {
     id: 'elite_hunter',
