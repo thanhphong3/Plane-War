@@ -3529,10 +3529,6 @@ export const NeonGame: React.FC = () => {
           centerBannerText={centerBannerText}
           isBannerVisible={isBannerVisible}
           bannerColorClass={bannerColorClass}
-          isMuted={isMuted}
-          isBgmMuted={isBgmMuted}
-          onToggleMute={toggleMute}
-          onToggleBgm={toggleBgm}
           onPause={togglePause}
           onTriggerDash={triggerDash}
           onTriggerEmp={triggerEmp}
@@ -3555,9 +3551,7 @@ export const NeonGame: React.FC = () => {
           onOpenShop={() => setIsShopOpen(true)}
           onOpenAchievements={() => setIsAchievementsOpen(true)}
           isMuted={isMuted}
-          isBgmMuted={isBgmMuted}
           onToggleMute={toggleMute}
-          onToggleBgm={toggleBgm}
         />
       )}
 

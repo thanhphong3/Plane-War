@@ -1,15 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   BookOpen,
   CalendarDays,
   Check,
+  ChevronDown,
   ChevronRight,
+  CircleHelp,
   Crown,
   Flame,
   Hand,
   InfinityIcon,
   Keyboard,
-  Music,
+  ListChecks,
   Play,
   Settings,
   Skull,
@@ -19,12 +21,14 @@ import {
   Volume2,
   VolumeX,
   Wrench,
+  X,
   Zap,
 } from 'lucide-react';
 import { LEVELS } from '../game/campaign';
 import { currentDaily, currentDailyQuests, dailyModifiers, msUntilTomorrow, prevDayKey, questById } from '../game/progression';
-import { setLang, tr, useLang, numLocale } from '../i18n';
+import { tr, useLang, numLocale } from '../i18n';
 import { localLevel, localModifier, localShip, questLabel } from '../i18n/content';
+import { useEscape } from '../hooks/useEscape';
 import { GameMode, SaveData, ShipDef } from '../types/game';
 import {
   DAILY_MODIFIERS,
@@ -53,9 +57,7 @@ interface MainMenuProps {
   onOpenShop: () => void;
   onOpenAchievements: () => void;
   isMuted: boolean;
-  isBgmMuted: boolean;
   onToggleMute: () => void;
-  onToggleBgm: () => void;
 }
 
 const MODES: {
@@ -69,8 +71,8 @@ const MODES: {
   extra?: (s: SaveData) => string | null;
 }[] = [
   { id: 'endless', name: () => tr('Endless', 'Vô Tận'), tag: () => tr('Ramps up forever', 'Khó dần mãi mãi'), Icon: InfinityIcon, accent: 'cyan', best: (s) => s.bestEndless },
-  { id: 'timed', name: () => tr('Blitz 60s', 'Tốc Chiến 60s'), tag: () => tr('Score attack', 'Săn điểm'), Icon: Timer, accent: 'fuchsia', best: (s) => s.bestTimed },
-  { id: 'hardcore', name: () => tr('Hardcore', 'Cực Hạn'), tag: () => tr('x2 shards', 'x2 mảnh'), Icon: Skull, accent: 'amber', best: (s) => s.bestHardcore },
+  { id: 'timed', name: () => tr('Blitz 60s', 'Tốc Chiến'), tag: () => tr('60s score attack', 'Săn điểm 60 giây'), Icon: Timer, accent: 'fuchsia', best: (s) => s.bestTimed },
+  { id: 'hardcore', name: () => tr('Hardcore', 'Cực Hạn'), tag: () => tr('One life, x2 shards', 'Một mạng, x2 mảnh'), Icon: Skull, accent: 'amber', best: (s) => s.bestHardcore },
   {
     id: 'bossrush',
     name: () => tr('Boss Rush', 'Boss Rush'),
@@ -83,335 +85,50 @@ const MODES: {
 ];
 
 const ACCENTS: Record<string, { on: string; text: string }> = {
-  cyan: { on: 'border-cyan-400 bg-cyan-500/15 shadow-cyan-500/25', text: 'text-cyan-300' },
-  fuchsia: { on: 'border-fuchsia-400 bg-fuchsia-500/15 shadow-fuchsia-500/25', text: 'text-fuchsia-300' },
-  amber: { on: 'border-amber-400 bg-amber-500/15 shadow-amber-500/25', text: 'text-amber-300' },
-  rose: { on: 'border-rose-400 bg-rose-500/15 shadow-rose-500/25', text: 'text-rose-300' },
+  cyan: { on: 'bg-cyan-500/20 border-cyan-400/80', text: 'text-cyan-300' },
+  fuchsia: { on: 'bg-fuchsia-500/20 border-fuchsia-400/80', text: 'text-fuchsia-300' },
+  amber: { on: 'bg-amber-500/20 border-amber-400/80', text: 'text-amber-300' },
+  rose: { on: 'bg-rose-500/20 border-rose-400/80', text: 'text-rose-300' },
 };
 
-export const MainMenu: React.FC<MainMenuProps> = ({
-  saveData,
-  gameMode,
-  onSelectMode,
-  onStartGame,
-  onStartDaily,
-  onOpenSettings,
-  onOpenCampaign,
-  onOpenShop,
-  onOpenAchievements,
-  isMuted,
-  isBgmMuted,
-  onToggleMute,
-  onToggleBgm,
-}) => {
+const HeaderButton: React.FC<{ onClick: () => void; label: string; children: React.ReactNode }> = ({ onClick, label, children }) => (
+  <button
+    type="button"
+    onClick={() => {
+      sound.playSound('click');
+      onClick();
+    }}
+    title={label}
+    aria-label={label}
+    className="w-9 h-9 rounded-full bg-slate-800/80 border border-slate-700 flex items-center justify-center btn-cyber text-slate-200 hover:text-white"
+  >
+    {children}
+  </button>
+);
+
+/** Controls and the visual grammar, tucked behind the "?" button so the menu stays clean. */
+const HowToPlay: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const lang = useLang();
-  const currentShip: ShipDef = localShip(paintedShip(SHIPS.find((s) => s.id === saveData.selectedShip) || SHIPS[0], saveData));
-  const shipMastery = masteryLevel(saveData.shipXp[currentShip.id] || 0);
-
-  // Daily Challenge & missions (both roll over at local midnight)
-  const daily = currentDaily(saveData);
-  const mods = dailyModifiers().map((id) => localModifier(DAILY_MODIFIERS.find((m) => m.id === id) || DAILY_MODIFIERS[0]));
-  const dq = currentDailyQuests(saveData);
-  const resetMins = Math.ceil(msUntilTomorrow() / 60000);
-  const resetIn = `${Math.floor(resetMins / 60)}h ${resetMins % 60}m`;
-  // A streak survives only if the last Daily was today or yesterday
-  const playedToday = daily.lastPlayed === daily.date;
-  const streakAlive = playedToday || daily.lastPlayed === prevDayKey(daily.date);
-  const streakNow = streakAlive ? daily.streak : 0;
-  const streakIfPlayed = playedToday ? daily.streak : streakNow + 1;
-  const campaignDone = (saveData.campaignStars[LEVELS.length - 1] || 0) > 0;
-  const nextSector = localLevel(LEVELS[Math.min(LEVELS.length - 1, saveData.campaignUnlocked)]);
-  const totalStars = saveData.campaignStars.reduce((s, n) => s + (n || 0), 0);
-
-  const canAffordSomething =
-    SHIPS.some((s) => !saveData.unlockedShips.includes(s.id) && saveData.shards >= s.cost) ||
-    UPGRADES.some((u) => {
-      const lvl = saveData.upgrades[u.id] || 0;
-      return lvl < u.maxLevel && saveData.shards >= upgradeCost(u.baseCost, lvl);
-    });
-  const canClaim = hasClaimableAchievement(saveData);
-
+  useEscape(true, onClose);
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-5 bg-slate-950/55 backdrop-blur-[3px]">
-      <div className="glass-panel w-full max-w-md rounded-3xl p-5 sm:p-6 flex flex-col max-h-[94dvh] custom-scroll *:shrink-0 anim-pop panel-glow">
-        {/* Header Bar */}
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md anim-fade" onClick={onClose}>
+      <div
+        className="glass-panel w-full max-w-sm rounded-3xl p-5 flex flex-col max-h-[90dvh] anim-pop panel-glow"
+        onClick={(ev) => ev.stopPropagation()}
+      >
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/40 text-amber-200 text-sm font-bold">
-            <ShardIcon size={14} />
-            <span className="tabular-nums">{saveData.shards.toLocaleString(numLocale())}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                sound.playSound('click');
-                onOpenSettings();
-              }}
-              title={tr('Settings', 'Cài đặt')}
-              aria-label={tr('Settings', 'Cài đặt')}
-              className="w-9 h-9 rounded-full bg-slate-800/90 border border-slate-700 flex items-center justify-center btn-cyber text-slate-200"
-            >
-              <Settings size={15} />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                sound.playSound('click');
-                setLang(lang === 'vi' ? 'en' : 'vi');
-              }}
-              title={tr('Switch language', 'Đổi ngôn ngữ')}
-              aria-label={tr('Switch language', 'Đổi ngôn ngữ')}
-              className="h-9 p-1 rounded-full bg-slate-800/90 border border-slate-700 flex items-center btn-cyber text-[10px] font-black font-cyber"
-            >
-              {(['en', 'vi'] as const).map((l) => (
-                <span
-                  key={l}
-                  className={`px-2 py-1 rounded-full transition-colors ${
-                    lang === l ? 'bg-cyan-400 text-slate-950' : 'text-slate-400'
-                  }`}
-                >
-                  {l.toUpperCase()}
-                </span>
-              ))}
-            </button>
-            <button
-              type="button"
-              onClick={onToggleBgm}
-              title={isBgmMuted ? tr('Turn music on', 'Bật nhạc') : tr('Turn music off', 'Tắt nhạc')}
-              className="relative w-9 h-9 rounded-full bg-slate-800/90 border border-slate-700 flex items-center justify-center btn-cyber text-slate-200"
-            >
-              <Music size={15} className={isBgmMuted ? 'opacity-40' : ''} />
-              {isBgmMuted && <span className="absolute w-5 h-[2px] bg-rose-400 rotate-45" />}
-            </button>
-            <button
-              type="button"
-              onClick={onToggleMute}
-              title={isMuted ? tr('Turn sound on', 'Bật âm thanh') : tr('Turn sound off', 'Tắt âm thanh')}
-              className="w-9 h-9 rounded-full bg-slate-800/90 border border-slate-700 flex items-center justify-center btn-cyber text-slate-200"
-            >
-              {isMuted ? <VolumeX size={15} className="text-rose-300" /> : <Volume2 size={15} />}
-            </button>
-          </div>
+          <h2 className="text-lg font-black text-white font-cyber tracking-wide">{tr('HOW TO PLAY', 'CÁCH CHƠI')}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={tr('Close', 'Đóng')}
+            className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center btn-cyber border border-slate-700"
+          >
+            <X size={16} />
+          </button>
         </div>
 
-        {/* Title */}
-        <div className="text-center mt-3">
-          <h1 className="title-logo text-[2.6rem] sm:text-[3.3rem] font-black italic tracking-tight font-cyber leading-none py-1 whitespace-nowrap">
-            NEON BLITZ
-          </h1>
-          <p className="text-[11px] sm:text-xs text-slate-300 font-bold mt-1.5 tracking-[0.3em] uppercase">
-            {tr('Dash', 'Lướt')} <span className="text-cyan-400">•</span> {tr('Graze', 'Sượt')}{' '}
-            <span className="text-fuchsia-400">•</span> {tr('Overdrive', 'Quá Tải')}
-          </p>
-        </div>
-
-        {/* Hangar preview */}
-        <button
-          type="button"
-          onClick={() => {
-            sound.playSound('click');
-            onOpenShop();
-          }}
-          className="group mt-4 relative flex items-center gap-3 p-3 rounded-2xl bg-slate-900/70 border border-slate-700/70 hover:border-slate-500 btn-cyber text-left"
-        >
-          <div className="relative shrink-0">
-            <div
-              className="absolute inset-2 rounded-full blur-xl opacity-60"
-              style={{ backgroundColor: currentShip.color }}
-            />
-            <ShipPreview ship={currentShip} size={72} animate />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] text-slate-400 uppercase tracking-wider font-cyber">
-              {tr('Your ship', 'Tàu của bạn')} · {tr('Mastery', 'Thông thạo')} {shipMastery}
-            </p>
-            <p className="text-lg font-black text-white font-cyber leading-tight" style={{ color: currentShip.color }}>
-              {currentShip.name}
-            </p>
-            <p className="text-xs text-slate-300">{currentShip.perk}</p>
-            <p className="text-[11px] text-slate-400 leading-snug mt-0.5">{currentShip.weapon}</p>
-          </div>
-          <span className="flex items-center gap-0.5 text-xs font-bold text-cyan-300 group-hover:translate-x-0.5 transition-transform">
-            {tr('Hangar', 'Xưởng tàu')} <ChevronRight size={14} />
-          </span>
-          {canAffordSomething && (
-            <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-          )}
-        </button>
-
-        {/* Story campaign */}
-        <button
-          type="button"
-          onClick={() => {
-            sound.playSound('click');
-            onOpenCampaign();
-          }}
-          className="group mt-3 relative overflow-hidden flex items-center gap-3 p-3 rounded-2xl border-2 border-rose-400/50 bg-gradient-to-r from-rose-500/15 via-fuchsia-500/10 to-indigo-500/15 hover:border-rose-300 btn-cyber text-left shadow-lg shadow-rose-500/10"
-        >
-          <span className="w-11 h-11 shrink-0 rounded-xl bg-rose-500/20 border border-rose-400/50 flex items-center justify-center text-rose-200">
-            <BookOpen size={20} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] text-rose-300 uppercase tracking-[0.2em] font-cyber font-bold">{tr('Campaign', 'Chiến dịch')}</p>
-            <p className="text-base font-black text-white font-cyber leading-tight">GRIDFALL</p>
-            <p className="text-[11px] text-slate-300 truncate">
-              {campaignDone
-                ? tr('Grid restored. Replay for 3 stars', 'Lưới đã hồi sinh. Chơi lại để lấy 3 sao')
-                : `${tr('Next', 'Tiếp theo')}: ${nextSector.code} · ${nextSector.name}`}
-            </p>
-          </div>
-          <div className="flex flex-col items-end gap-0.5">
-            <span className="flex items-center gap-1 text-xs font-bold text-amber-300 tabular-nums">
-              <Star size={12} fill="currentColor" /> {totalStars}/{LEVELS.length * 3}
-            </span>
-            <span className="flex items-center gap-0.5 text-xs font-bold text-rose-200 group-hover:translate-x-0.5 transition-transform">
-              {tr('Play', 'Chơi')} <ChevronRight size={14} />
-            </span>
-          </div>
-        </button>
-
-        {/* Daily Challenge */}
-        <button
-          type="button"
-          onClick={() => {
-            sound.playSound('click');
-            onStartDaily();
-          }}
-          className="group mt-3 relative overflow-hidden p-3 rounded-2xl border-2 border-amber-400/50 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-fuchsia-500/10 hover:border-amber-300 btn-cyber text-left shadow-lg shadow-amber-500/10"
-        >
-          <div className="flex items-center gap-3">
-            <span className="w-11 h-11 shrink-0 rounded-xl bg-amber-500/20 border border-amber-400/50 flex items-center justify-center text-amber-200">
-              <CalendarDays size={20} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] text-amber-300 uppercase tracking-[0.2em] font-cyber font-bold">
-                {tr('Daily Challenge', 'Thử Thách Ngày')}
-              </p>
-              <p className="text-[11px] text-slate-300 leading-snug">
-                {tr('Same spawns for everyone today, two twists:', 'Hôm nay mọi người cùng một màn, kèm hai luật:')}
-              </p>
-            </div>
-            <div className="flex flex-col items-end gap-0.5 shrink-0">
-              <span className="flex items-center gap-1 text-xs font-bold text-amber-200 tabular-nums">
-                <Flame size={12} /> {streakNow} {tr('days', 'ngày')}
-              </span>
-              <span className="flex items-center gap-0.5 text-xs font-bold text-amber-100 group-hover:translate-x-0.5 transition-transform">
-                {tr('Play', 'Chơi')} <ChevronRight size={14} />
-              </span>
-            </div>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {mods.map((m) => (
-              <span
-                key={m.id}
-                className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
-                style={{ color: m.color, borderColor: `${m.color}66`, backgroundColor: `${m.color}1a` }}
-                title={m.desc}
-              >
-                {m.name} · <span className="font-semibold text-slate-300">{m.desc}</span>
-              </span>
-            ))}
-          </div>
-          <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
-            <span>
-              {tr('Today’s best', 'Kỷ lục hôm nay')}{' '}
-              <span className="font-bold text-slate-100 tabular-nums">{daily.best.toLocaleString(numLocale())}</span>
-            </span>
-            <span>
-              {daily.rewarded
-                ? tr('Bonus claimed', 'Đã nhận thưởng')
-                : tr(`First run: +${dailyBonus(streakIfPlayed, 1)}+ shards`, `Lượt đầu: +${dailyBonus(streakIfPlayed, 1)}+ mảnh`)}
-              {' · '}
-              {tr('resets in', 'làm mới sau')} {resetIn}
-            </span>
-          </div>
-        </button>
-
-        {/* Daily missions */}
-        <div className="mt-3 p-3 rounded-2xl bg-slate-900/60 border border-slate-800/80">
-          <div className="flex items-center justify-between">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 font-cyber">{tr('Daily missions', 'Nhiệm vụ ngày')}</p>
-            <span className="text-[10px] font-bold text-amber-300 flex items-center gap-1">
-              {dq.bonusPaid ? (
-                <>
-                  <Check size={11} /> {tr('Bonus earned', 'Đã nhận thưởng')}
-                </>
-              ) : (
-                <>
-                  {tr('All 3', 'Cả 3')}: +{DAILY_QUEST_BONUS} <ShardIcon size={10} />
-                </>
-              )}
-            </span>
-          </div>
-          <div className="mt-1.5 space-y-1.5">
-            {dq.ids.map((id, i) => {
-              const q = questById(id);
-              const done = dq.done[i];
-              const prog = Math.min(q.target, Math.floor(dq.progress[i] || 0));
-              return (
-                <div key={id} className="flex items-center gap-2 text-xs">
-                  <span
-                    className={`w-4 h-4 shrink-0 rounded-full border flex items-center justify-center ${
-                      done ? 'bg-emerald-400 border-emerald-300 text-slate-950' : 'border-slate-600'
-                    }`}
-                  >
-                    {done && <Check size={10} strokeWidth={3} />}
-                  </span>
-                  <span className={`min-w-0 flex-1 truncate ${done ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
-                    {questLabel(q)}
-                  </span>
-                  <span className="text-[10px] tabular-nums text-slate-400">
-                    {done ? '' : `${prog.toLocaleString(numLocale())}/${q.target.toLocaleString(numLocale())} · `}
-                    <span className="text-amber-300 font-bold">+{q.reward}</span>
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Mode selector with personal bests */}
-        <div className="mt-4">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 font-cyber">{tr('Arcade modes', 'Chế độ arcade')}</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {MODES.map((m) => {
-              const active = gameMode === m.id;
-              const accent = ACCENTS[m.accent];
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => {
-                    sound.playSound('click');
-                    onSelectMode(m.id);
-                  }}
-                  className={`py-2.5 px-1.5 rounded-xl border-2 flex flex-col items-center gap-0.5 btn-cyber ${
-                    active
-                      ? `${accent.on} shadow-lg text-white`
-                      : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                  }`}
-                >
-                  <m.Icon size={18} className={active ? accent.text : ''} />
-                  <span className="text-xs font-bold">{m.name()}</span>
-                  <span className={`text-[10px] ${active ? accent.text : 'text-slate-500'}`}>{m.tag()}</span>
-                  <span className="mt-1 text-[10px] text-slate-400 flex items-center gap-1">
-                    <Trophy size={10} />
-                    <span className="tabular-nums font-bold text-slate-200">{m.best(saveData).toLocaleString(numLocale())}</span>
-                  </span>
-                  {m.extra?.(saveData) && (
-                    <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                      <Timer size={10} />
-                      <span className="tabular-nums font-bold text-emerald-300">{m.extra(saveData)}</span>
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Quick Instructions */}
-        <div className="mt-4 bg-slate-900/60 rounded-2xl p-3 border border-slate-800/80 text-xs text-slate-300 space-y-2">
+        <div className="custom-scroll mt-4 space-y-3 text-sm text-slate-300 pr-1">
           <div className="flex items-start gap-2.5">
             <span className="how-icon bg-cyan-500/20 text-cyan-300">
               <Hand size={13} />
@@ -432,15 +149,13 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             </span>
             {lang === 'vi' ? (
               <span>
-                <strong className="text-white">Chạm đúp</strong> hoặc bấm <strong className="text-cyan-300">LƯỚT</strong> để
-                lao vút <strong className="text-white">bất tử trong chốc lát</strong>: húc nát kẻ địch (+combo), húc Lõi
-                Plasma để bắn ngược lại. Hồi chiêu ~2s.
+                <strong className="text-white">Chạm đúp</strong> hoặc bấm <strong className="text-cyan-300">LƯỚT</strong> để lao vút{' '}
+                <strong className="text-white">bất tử</strong>: húc nát kẻ địch, húc Lõi Plasma để bắn ngược lại.
               </span>
             ) : (
               <span>
-                <strong className="text-white">Double-tap</strong> or hit <strong className="text-cyan-300">DASH</strong> for a
-                short <strong className="text-white">invincible burst</strong>: ram enemies to smash them (+combo), ram
-                Plasma Cores to fire them back. Recharges in ~2s.
+                <strong className="text-white">Double-tap</strong> or hit <strong className="text-cyan-300">DASH</strong> for a short{' '}
+                <strong className="text-white">invincible burst</strong>: ram enemies, ram Plasma Cores to fire them back.
               </span>
             )}
           </div>
@@ -450,41 +165,37 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             </span>
             {lang === 'vi' ? (
               <span>
-                <strong className="text-white">Lướt sát nguy hiểm</strong> để né sát — nạp đầy thanh để kích hoạt{' '}
+                <strong className="text-white">Lướt sát nguy hiểm</strong> để nạp thanh năng lượng và kích hoạt{' '}
                 <strong className="text-amber-300">Quá Tải</strong>.
               </span>
             ) : (
               <span>
-                <strong className="text-white">Skim past danger</strong> for near-misses — fill the bar to trigger{' '}
+                <strong className="text-white">Skim past danger</strong> to fill the energy bar and trigger{' '}
                 <strong className="text-amber-300">Overdrive</strong>.
               </span>
             )}
           </div>
+
           {/* Visual grammar legend: what to grab, what to dodge, what to dash into */}
-          <div className="grid grid-cols-3 gap-1.5 pt-1">
-            <span className="flex items-center gap-1.5 rounded-lg bg-amber-400/10 border border-amber-300/30 px-2 py-1.5">
-              <span className="relative w-4 h-4 shrink-0 rounded-full border-2 border-white bg-amber-300/60 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
-              <span className="leading-tight">
-                <strong className="text-amber-200 block text-[11px]">{tr('GRAB', 'NHẶT')}</strong>
-                <span className="text-[10px] text-slate-400">{tr('white rim, sparkles', 'viền trắng, lấp lánh')}</span>
-              </span>
+          <div className="grid grid-cols-3 gap-1.5 pt-1 text-xs">
+            <span className="flex flex-col items-center gap-1 rounded-lg bg-amber-400/10 border border-amber-300/30 px-1.5 py-2 text-center">
+              <span className="w-4 h-4 rounded-full border-2 border-white bg-amber-300/60 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
+              <strong className="text-amber-200 text-[11px]">{tr('GRAB', 'NHẶT')}</strong>
+              <span className="text-[10px] text-slate-400 leading-tight">{tr('white rim', 'viền trắng')}</span>
             </span>
-            <span className="flex items-center gap-1.5 rounded-lg bg-rose-500/10 border border-rose-400/30 px-2 py-1.5">
-              <span className="w-4 h-4 shrink-0 rounded-full border-2 border-[#ff2d55] bg-pink-400/70 shadow-[0_0_8px_rgba(255,45,85,0.9)]" />
-              <span className="leading-tight">
-                <strong className="text-rose-300 block text-[11px]">{tr('DODGE', 'NÉ')}</strong>
-                <span className="text-[10px] text-slate-400">{tr('red rim = hurts', 'viền đỏ = gây sát thương')}</span>
-              </span>
+            <span className="flex flex-col items-center gap-1 rounded-lg bg-rose-500/10 border border-rose-400/30 px-1.5 py-2 text-center">
+              <span className="w-4 h-4 rounded-full border-2 border-[#ff2d55] bg-pink-400/70 shadow-[0_0_8px_rgba(255,45,85,0.9)]" />
+              <strong className="text-rose-300 text-[11px]">{tr('DODGE', 'NÉ')}</strong>
+              <span className="text-[10px] text-slate-400 leading-tight">{tr('red rim', 'viền đỏ')}</span>
             </span>
-            <span className="flex items-center gap-1.5 rounded-lg bg-cyan-500/10 border border-cyan-400/30 px-2 py-1.5">
-              <span className="w-4 h-4 shrink-0 rounded-full border-2 border-dashed border-cyan-300 bg-orange-400/70" />
-              <span className="leading-tight">
-                <strong className="text-cyan-200 block text-[11px]">{tr('DASH IN', 'LƯỚT VÀO')}</strong>
-                <span className="text-[10px] text-slate-400">{tr('cyan target', 'mục tiêu xanh')}</span>
-              </span>
+            <span className="flex flex-col items-center gap-1 rounded-lg bg-cyan-500/10 border border-cyan-400/30 px-1.5 py-2 text-center">
+              <span className="w-4 h-4 rounded-full border-2 border-dashed border-cyan-300 bg-orange-400/70" />
+              <strong className="text-cyan-200 text-[11px]">{tr('DASH IN', 'LƯỚT VÀO')}</strong>
+              <span className="text-[10px] text-slate-400 leading-tight">{tr('cyan target', 'mục tiêu xanh')}</span>
             </span>
           </div>
-          <div className="hidden sm:flex items-start gap-2.5 text-slate-400">
+
+          <div className="hidden sm:flex items-start gap-2.5 text-slate-400 text-xs">
             <span className="how-icon bg-slate-700/40 text-slate-300">
               <Keyboard size={13} />
             </span>
@@ -496,58 +207,296 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             </span>
           </div>
         </div>
+      </div>
+    </div>
+  );
+};
 
-        {/* CTAs */}
-        <div className="flex flex-col gap-2 mt-4">
+export const MainMenu: React.FC<MainMenuProps> = ({
+  saveData,
+  gameMode,
+  onSelectMode,
+  onStartGame,
+  onStartDaily,
+  onOpenSettings,
+  onOpenCampaign,
+  onOpenShop,
+  onOpenAchievements,
+  isMuted,
+  onToggleMute,
+}) => {
+  useLang();
+  const [showHelp, setShowHelp] = useState(false);
+  const [showMissions, setShowMissions] = useState(false);
+  const currentShip: ShipDef = localShip(paintedShip(SHIPS.find((s) => s.id === saveData.selectedShip) || SHIPS[0], saveData));
+  const shipMastery = masteryLevel(saveData.shipXp[currentShip.id] || 0);
+
+  // Daily Challenge & missions (both roll over at local midnight)
+  const daily = currentDaily(saveData);
+  const mods = dailyModifiers().map((id) => localModifier(DAILY_MODIFIERS.find((m) => m.id === id) || DAILY_MODIFIERS[0]));
+  const dq = currentDailyQuests(saveData);
+  const questsDone = dq.done.filter(Boolean).length;
+  const resetMins = Math.ceil(msUntilTomorrow() / 60000);
+  const resetIn = `${Math.floor(resetMins / 60)}h ${resetMins % 60}m`;
+  // A streak survives only if the last Daily was today or yesterday
+  const playedToday = daily.lastPlayed === daily.date;
+  const streakAlive = playedToday || daily.lastPlayed === prevDayKey(daily.date);
+  const streakNow = streakAlive ? daily.streak : 0;
+  const streakIfPlayed = playedToday ? daily.streak : streakNow + 1;
+  const campaignDone = (saveData.campaignStars[LEVELS.length - 1] || 0) > 0;
+  const nextSector = localLevel(LEVELS[Math.min(LEVELS.length - 1, saveData.campaignUnlocked)]);
+  const totalStars = saveData.campaignStars.reduce((s, n) => s + (n || 0), 0);
+
+  const canAffordSomething =
+    SHIPS.some((s) => !saveData.unlockedShips.includes(s.id) && saveData.shards >= s.cost) ||
+    UPGRADES.some((u) => {
+      const lvl = saveData.upgrades[u.id] || 0;
+      return lvl < u.maxLevel && saveData.shards >= upgradeCost(u.baseCost, lvl);
+    });
+  const canClaim = hasClaimableAchievement(saveData);
+
+  const mode = MODES.find((m) => m.id === gameMode) || MODES[0];
+  const modeAccent = ACCENTS[mode.accent];
+  const modeExtra = mode.extra?.(saveData);
+
+  return (
+    <div className="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-5 bg-slate-950/55 backdrop-blur-[3px]">
+      <div className="glass-panel w-full max-w-md rounded-3xl p-4 sm:p-6 flex flex-col gap-3 max-h-[94dvh] custom-scroll *:shrink-0 anim-pop panel-glow">
+        {/* Header: currency left, utility icons right */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/40 text-amber-200 text-sm font-bold">
+            <ShardIcon size={14} />
+            <span className="tabular-nums">{saveData.shards.toLocaleString(numLocale())}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <HeaderButton onClick={() => setShowHelp(true)} label={tr('How to play', 'Cách chơi')}>
+              <CircleHelp size={16} />
+            </HeaderButton>
+            <HeaderButton onClick={onToggleMute} label={isMuted ? tr('Turn sound on', 'Bật âm thanh') : tr('Turn sound off', 'Tắt âm thanh')}>
+              {isMuted ? <VolumeX size={16} className="text-rose-300" /> : <Volume2 size={16} />}
+            </HeaderButton>
+            <HeaderButton onClick={onOpenSettings} label={tr('Settings', 'Cài đặt')}>
+              <Settings size={16} />
+            </HeaderButton>
+          </div>
+        </div>
+
+        {/* Title */}
+        <div className="text-center">
+          <h1 className="title-logo text-[2.5rem] sm:text-[3.2rem] font-black italic tracking-tight font-cyber leading-none py-1 whitespace-nowrap">
+            NEON BLITZ
+          </h1>
+          <p className="text-[10px] sm:text-[11px] text-slate-400 font-bold mt-1 tracking-[0.3em] uppercase">
+            {tr('Dash', 'Lướt')} <span className="text-cyan-400">•</span> {tr('Graze', 'Sượt')}{' '}
+            <span className="text-fuchsia-400">•</span> {tr('Overdrive', 'Quá Tải')}
+          </p>
+        </div>
+
+        {/* Ship: tap to open the Hangar */}
+        <button
+          type="button"
+          onClick={() => {
+            sound.playSound('click');
+            onOpenShop();
+          }}
+          className="group relative flex items-center gap-3 p-2.5 pr-3 rounded-2xl bg-slate-900/60 border border-slate-700/70 hover:border-slate-500 btn-cyber text-left"
+        >
+          <div className="relative shrink-0">
+            <div className="absolute inset-2 rounded-full blur-xl opacity-60" style={{ backgroundColor: currentShip.color }} />
+            <ShipPreview ship={currentShip} size={56} animate />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-base font-black font-cyber leading-tight truncate" style={{ color: currentShip.color }}>
+              {currentShip.name}
+            </p>
+            <p className="text-xs text-slate-400 truncate">
+              {tr('Mastery', 'Thông thạo')} {shipMastery} · {currentShip.perk}
+            </p>
+          </div>
+          <span className="flex items-center gap-1 text-xs font-bold text-cyan-300 group-hover:translate-x-0.5 transition-transform">
+            <Wrench size={13} /> <span className="hidden min-[400px]:inline">{tr('Hangar', 'Xưởng tàu')}</span> <ChevronRight size={14} />
+          </span>
+          {canAffordSomething && (
+            <span className="absolute -top-1.5 right-3 px-1.5 rounded-full bg-amber-400 text-slate-950 text-[9px] font-black">
+              {tr('NEW', 'MỚI')}
+            </span>
+          )}
+        </button>
+
+        {/* Arcade: pick a mode, then launch */}
+        <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800/80">
+          <div role="tablist" aria-label={tr('Arcade modes', 'Chế độ arcade')} className="grid grid-cols-4 gap-1.5">
+            {MODES.map((m) => {
+              const active = gameMode === m.id;
+              const accent = ACCENTS[m.accent];
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => {
+                    sound.playSound('click');
+                    onSelectMode(m.id);
+                  }}
+                  className={`py-2 px-1 rounded-xl border flex flex-col items-center gap-1 btn-cyber ${
+                    active ? `${accent.on} text-white` : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  }`}
+                >
+                  <m.Icon size={18} className={active ? accent.text : ''} />
+                  <span className="text-[11px] font-bold leading-none whitespace-nowrap">{m.name()}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-2.5 flex items-center justify-between gap-2 px-1 text-xs">
+            <span className={`truncate ${modeAccent.text}`}>{mode.tag()}</span>
+            <span className="flex items-center gap-2 shrink-0 text-slate-400">
+              <span className="flex items-center gap-1">
+                <Trophy size={11} />
+                <span className="tabular-nums font-bold text-slate-100">{mode.best(saveData).toLocaleString(numLocale())}</span>
+              </span>
+              {modeExtra && (
+                <span className="flex items-center gap-1">
+                  <Timer size={11} />
+                  <span className="tabular-nums font-bold text-emerald-300">{modeExtra}</span>
+                </span>
+              )}
+            </span>
+          </div>
+
           <button
             type="button"
             onClick={() => {
               sound.playSound('click');
               onStartGame();
             }}
-            className="w-full py-4 rounded-2xl btn-primary text-slate-950 font-black text-lg tracking-[0.15em] uppercase font-cyber btn-cyber animate-glow flex items-center justify-center gap-2"
+            className="mt-3 w-full py-3.5 rounded-xl btn-primary text-slate-950 font-black text-lg tracking-[0.15em] uppercase font-cyber btn-cyber animate-glow flex items-center justify-center gap-2"
           >
             <Play size={20} fill="currentColor" /> {tr('Launch', 'Xuất kích')}
           </button>
-
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                sound.playSound('click');
-                onOpenShop();
-              }}
-              className="relative py-3 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-slate-100 font-bold text-xs flex items-center justify-center gap-1.5 btn-cyber font-cyber"
-            >
-              <Wrench size={14} className="text-cyan-300" /> {tr('Hangar', 'Xưởng tàu')}
-              {canAffordSomething && (
-                <span className="absolute top-1.5 right-2 px-1.5 rounded-full bg-amber-400 text-slate-950 text-[9px] font-black">
-                  {tr('NEW', 'MỚI')}
-                </span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                sound.playSound('click');
-                onOpenAchievements();
-              }}
-              className="relative py-3 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-amber-200 font-bold text-xs flex items-center justify-center gap-1.5 btn-cyber font-cyber"
-            >
-              <Trophy size={14} className="text-amber-300" /> {tr('Achievements', 'Thành tựu')}
-              {canClaim && (
-                <span className="absolute top-1.5 right-2 w-2.5 h-2.5 rounded-full bg-rose-500 shadow shadow-rose-500/60 animate-pulse" />
-              )}
-            </button>
-          </div>
-
-          <p className="text-center text-[10px] text-slate-500 mt-1">
-            {tr('Best combo', 'Combo cao nhất')} x{saveData.bestCombo} • {tr('Bosses destroyed', 'Boss đã hạ')}{' '}
-            {saveData.totalBossKills} • {tr('Runs', 'Lượt chơi')} {saveData.totalRuns}
-          </p>
         </div>
+
+        {/* Campaign & Daily side by side */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              sound.playSound('click');
+              onOpenCampaign();
+            }}
+            className="group flex flex-col gap-1 p-3 rounded-2xl border border-rose-400/40 bg-rose-500/10 hover:border-rose-300 btn-cyber text-left"
+          >
+            <span className="flex items-center justify-between">
+              <BookOpen size={18} className="text-rose-300" />
+              <span className="flex items-center gap-1 text-[11px] font-bold text-amber-300 tabular-nums">
+                <Star size={11} fill="currentColor" /> {totalStars}/{LEVELS.length * 3}
+              </span>
+            </span>
+            <span className="text-sm font-black text-white font-cyber leading-tight">{tr('Campaign', 'Chiến dịch')}</span>
+            <span className="text-[11px] text-slate-400 leading-tight truncate">
+              {campaignDone ? tr('Replay for 3 stars', 'Chơi lại lấy 3 sao') : `${nextSector.code} · ${nextSector.name}`}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              sound.playSound('click');
+              onStartDaily();
+            }}
+            title={mods.map((m) => `${m.name}: ${m.desc}`).join('\n')}
+            className="group flex flex-col gap-1 p-3 rounded-2xl border border-amber-400/40 bg-amber-500/10 hover:border-amber-300 btn-cyber text-left"
+          >
+            <span className="flex items-center justify-between">
+              <CalendarDays size={18} className="text-amber-300" />
+              <span className="flex items-center gap-1 text-[11px] font-bold text-amber-200 tabular-nums">
+                <Flame size={11} /> {streakNow}
+              </span>
+            </span>
+            <span className="text-sm font-black text-white font-cyber leading-tight">{tr('Daily', 'Thử thách ngày')}</span>
+            <span className="text-[11px] text-slate-400 leading-tight truncate">
+              {daily.rewarded
+                ? `${tr('Best', 'Kỷ lục')} ${daily.best.toLocaleString(numLocale())} · ${resetIn}`
+                : tr(`+${dailyBonus(streakIfPlayed, 1)} shards today`, `+${dailyBonus(streakIfPlayed, 1)} mảnh hôm nay`)}
+            </span>
+          </button>
+        </div>
+
+        {/* Secondary: missions (expandable) and achievements */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              sound.playSound('click');
+              setShowMissions((v) => !v);
+            }}
+            aria-expanded={showMissions}
+            className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-700/70 text-slate-200 text-xs font-bold btn-cyber"
+          >
+            <ListChecks size={14} className="text-cyan-300" />
+            {tr('Missions', 'Nhiệm vụ')}
+            <span className="tabular-nums text-slate-400">{questsDone}/3</span>
+            <ChevronDown size={13} className={`text-slate-500 transition-transform ${showMissions ? 'rotate-180' : ''}`} />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              sound.playSound('click');
+              onOpenAchievements();
+            }}
+            className="relative flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-700/70 text-slate-200 text-xs font-bold btn-cyber"
+          >
+            <Trophy size={14} className="text-amber-300" /> {tr('Achievements', 'Thành tựu')}
+            {canClaim && <span className="absolute top-1.5 right-2 w-2 h-2 rounded-full bg-rose-500 animate-pulse" />}
+          </button>
+        </div>
+
+        {showMissions && (
+          <div className="-mt-1 p-3 rounded-2xl bg-slate-900/60 border border-slate-800/80 anim-drop space-y-1.5">
+            {dq.ids.map((id, i) => {
+              const q = questById(id);
+              const done = dq.done[i];
+              const prog = Math.min(q.target, Math.floor(dq.progress[i] || 0));
+              return (
+                <div key={id} className="flex items-center gap-2 text-xs">
+                  <span
+                    className={`w-4 h-4 shrink-0 rounded-full border flex items-center justify-center ${
+                      done ? 'bg-emerald-400 border-emerald-300 text-slate-950' : 'border-slate-600'
+                    }`}
+                  >
+                    {done && <Check size={10} strokeWidth={3} />}
+                  </span>
+                  <span className={`min-w-0 flex-1 truncate ${done ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{questLabel(q)}</span>
+                  <span className="text-[10px] tabular-nums text-slate-400">
+                    {done ? '' : `${prog.toLocaleString(numLocale())}/${q.target.toLocaleString(numLocale())} · `}
+                    <span className="text-amber-300 font-bold">+{q.reward}</span>
+                  </span>
+                </div>
+              );
+            })}
+            <p className="pt-1 text-[10px] text-slate-500 flex items-center justify-between">
+              <span>
+                {tr('Resets in', 'Làm mới sau')} {resetIn}
+              </span>
+              <span className="text-amber-300 font-bold flex items-center gap-1">
+                {dq.bonusPaid ? (
+                  <>
+                    <Check size={11} /> {tr('Bonus earned', 'Đã nhận thưởng')}
+                  </>
+                ) : (
+                  <>
+                    {tr('All 3', 'Cả 3')}: +{DAILY_QUEST_BONUS} <ShardIcon size={10} />
+                  </>
+                )}
+              </span>
+            </p>
+          </div>
+        )}
       </div>
+
+      {showHelp && <HowToPlay onClose={() => setShowHelp(false)} />}
     </div>
   );
 };

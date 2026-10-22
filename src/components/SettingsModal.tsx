@@ -1,6 +1,6 @@
 import React from 'react';
 import { Eye, Hand, Music, Smartphone, Vibrate, Volume2, X } from 'lucide-react';
-import { tr, useLang } from '../i18n';
+import { setLang, tr, useLang } from '../i18n';
 import { GameSettings } from '../types/game';
 import { sound } from '../utils/audio';
 import { DEFAULT_SETTINGS } from '../utils/constants';
@@ -70,7 +70,7 @@ const Toggle: React.FC<{ label: string; hint: string; icon: React.ReactNode; on:
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, settings, onChange, onClose }) => {
-  useLang();
+  const lang = useLang();
   if (!isOpen) return null;
 
   return (
@@ -89,6 +89,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, settings, 
         </div>
 
         <div className="custom-scroll mt-4 space-y-4 pr-1">
+          <section className="space-y-2">
+            <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold font-cyber">{tr('Language', 'Ngôn ngữ')}</p>
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-slate-900/80 border border-slate-800">
+              {([
+                ['en', 'English'],
+                ['vi', 'Tiếng Việt'],
+              ] as const).map(([l, name]) => (
+                <button
+                  key={l}
+                  type="button"
+                  onClick={() => {
+                    sound.playSound('click');
+                    setLang(l);
+                  }}
+                  className={`py-2 rounded-lg text-xs font-bold btn-cyber ${
+                    lang === l ? 'bg-cyan-400 text-slate-950' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          </section>
+
           <section className="space-y-3">
             <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold font-cyber">{tr('Audio', 'Âm thanh')}</p>
             <Slider
