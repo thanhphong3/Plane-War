@@ -13,6 +13,7 @@ import {
   InfinityIcon,
   Keyboard,
   ListChecks,
+  Lock,
   Play,
   Settings,
   Skull,
@@ -30,7 +31,7 @@ import { currentDaily, currentDailyQuests, dailyModifiers, msUntilTomorrow, prev
 import { tr, useLang, numLocale } from '../i18n';
 import { localLevel, localModifier, localShip, questLabel } from '../i18n/content';
 import { useEscape } from '../hooks/useEscape';
-import { GameMode, SaveData, ShipDef } from '../types/game';
+import { BossKind, GameMode, SaveData, ShipDef } from '../types/game';
 import {
   BOSS_RUSH_ORDER,
   DAILY_MODIFIERS,
@@ -53,6 +54,9 @@ interface MainMenuProps {
   saveData: SaveData;
   gameMode: GameMode;
   onSelectMode: (mode: GameMode) => void;
+  /** Boss Rush starting point (roster index) and its setter. */
+  bossRushStart: number;
+  onSelectBossRushStart: (index: number) => void;
   onStartGame: () => void;
   onStartDaily: () => void;
   onStartTutorial: () => void;
@@ -228,10 +232,78 @@ const HowToPlay: React.FC<{ onClose: () => void; onStartTutorial: () => void }> 
   );
 };
 
+/** Boss Rush roster entry: display name and colour. */
+const rushBoss = (kind: BossKind) => {
+  const lvl = LEVELS.find((l) => l.boss === kind);
+  return lvl ? { name: lvl.bossName, color: lvl.accent } : { name: tr('SENTINEL', 'LÍNH CANH'), color: '#e879f9' };
+};
+
+/** Pick where the next Boss Rush starts: the first boss, or any boss already beaten in a Rush. */
+const BossRushPicker: React.FC<{ saveData: SaveData; start: number; onSelect: (index: number) => void }> = ({
+  saveData,
+  start,
+  onSelect,
+}) => {
+  const unlocked = (i: number) => i === 0 || saveData.bossRushDefeated.includes(BOSS_RUSH_ORDER[i]);
+  const count = BOSS_RUSH_ORDER.filter((_, i) => i > 0 && unlocked(i)).length;
+  // A stale pick (e.g. a reset save) falls back to the first boss
+  const current = unlocked(start) ? start : 0;
+  return (
+    <div className="mt-2.5">
+      <div className="flex items-center justify-between px-1 text-[11px]">
+        <span className="font-bold text-slate-300">{tr('Start from', 'Bắt đầu từ')}</span>
+        <span className="text-slate-500 tabular-nums">
+          {tr(`${count} unlocked`, `Đã mở ${count}`)}
+        </span>
+      </div>
+      <div className="mt-1.5 flex gap-1.5 overflow-x-auto pb-1 custom-scroll" role="radiogroup" aria-label={tr('Starting boss', 'Boss xuất phát')}>
+        {BOSS_RUSH_ORDER.map((kind, i) => {
+          const open = unlocked(i);
+          const active = i === current;
+          const boss = rushBoss(kind);
+          return (
+            <button
+              key={kind}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              disabled={!open}
+              title={open ? boss.name : tr('Beat this boss in a Rush to unlock it', 'Hạ boss này trong Boss Rush để mở khóa')}
+              onClick={() => {
+                sound.playSound('click');
+                onSelect(i);
+              }}
+              className={`shrink-0 w-[4.6rem] px-1.5 py-1.5 rounded-lg border text-center btn-cyber ${
+                active ? 'bg-rose-500/20 border-rose-400/80' : open ? 'border-slate-700 hover:border-slate-500' : 'border-slate-800 opacity-40'
+              }`}
+            >
+              <span className="block text-[9px] font-bold text-slate-400 tabular-nums">#{i + 1}</span>
+              <span className="flex items-center justify-center gap-0.5 text-[10px] font-black leading-tight truncate" style={{ color: open ? boss.color : '#64748b' }}>
+                {!open && <Lock size={9} className="shrink-0" />}
+                <span className="truncate">{boss.name}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {current > 0 && (
+        <p className="mt-1 px-1 text-[10px] text-slate-500 leading-snug">
+          {tr(
+            'Practice run: up to 3 bonus perks to catch up. Records need a full run from boss 1.',
+            'Chơi luyện tập: tối đa 3 nâng cấp bù. Kỷ lục chỉ tính khi chơi từ boss 1.'
+          )}
+        </p>
+      )}
+    </div>
+  );
+};
+
 export const MainMenu: React.FC<MainMenuProps> = ({
   saveData,
   gameMode,
   onSelectMode,
+  bossRushStart,
+  onSelectBossRushStart,
   onStartGame,
   onStartDaily,
   onStartTutorial,
@@ -409,6 +481,10 @@ export const MainMenu: React.FC<MainMenuProps> = ({
               )}
             </span>
           </div>
+
+          {gameMode === 'bossrush' && (
+            <BossRushPicker saveData={saveData} start={bossRushStart} onSelect={onSelectBossRushStart} />
+          )}
 
           <button
             type="button"

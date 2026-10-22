@@ -628,6 +628,7 @@ export const INITIAL_SAVE: SaveData = {
   bestBossRush: 0,
   bestBossRushTime: 0,
   bossRushRoster: BOSS_RUSH_ORDER.length,
+  bossRushDefeated: [],
   bestCombo: 1,
   bestFeverInRun: 0,
   totalRuns: 0,

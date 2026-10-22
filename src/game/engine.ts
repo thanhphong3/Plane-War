@@ -139,6 +139,10 @@ export function createEngineState() {
     bossRushTimer: 0,
     /** Every boss in the Rush is down: victory lap before the results screen. */
     bossRushWon: false,
+    /** Roster index this Rush started from (0 = the full gauntlet, which alone counts for records). */
+    bossRushStart: 0,
+    /** Extra perk pickers still owed at the start of a late-start Rush. */
+    bonusPicks: 0,
 
     // Tactical Perks
     activePerks: [] as PerkId[],

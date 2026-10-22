@@ -48,6 +48,8 @@ export interface GameOverStats {
     /** Fastest full clear (0 = none yet). */
     bestTime: number;
     newBestTime: boolean;
+    /** Roster index the Rush started from (0 = full gauntlet). */
+    start: number;
   } | null;
   /** Points per source this run. */
   scoreBy: Record<ScoreSource, number>;
@@ -466,9 +468,19 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         {rush && (
           <p className="text-xs text-slate-400 mt-1">
             {stats.reason === 'victory'
-              ? tr(`All ${rush.total} bosses down. +250 shard bounty!`, `Hạ cả ${rush.total} boss. Thưởng +250 mảnh!`)
+              ? rush.start > 0
+                ? tr(`Gauntlet finished from boss ${rush.start + 1}!`, `Đã phá đảo từ boss ${rush.start + 1}!`)
+                : tr(`All ${rush.total} bosses down. +250 shard bounty!`, `Hạ cả ${rush.total} boss. Thưởng +250 mảnh!`)
               : tr(`Fell at boss ${Math.min(rush.total, rush.cleared + 1)}/${rush.total}`, `Gục ngã ở boss ${Math.min(rush.total, rush.cleared + 1)}/${rush.total}`)}
             {rush.bestTime > 0 && ` • ${tr('Best', 'Kỷ lục')} ${formatRunTime(rush.bestTime)}`}
+          </p>
+        )}
+        {rush && rush.start > 0 && (
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            {tr(
+              `Started at boss ${rush.start + 1}: records and the clear bounty need a full run.`,
+              `Bắt đầu từ boss ${rush.start + 1}: kỷ lục và thưởng phá đảo chỉ tính khi chơi từ đầu.`
+            )}
           </p>
         )}
 

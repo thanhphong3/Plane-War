@@ -1,4 +1,4 @@
-import { SaveData } from '../types/game';
+import { BossKind, SaveData } from '../types/game';
 import { BOSS_RUSH_ORDER, DEFAULT_SETTINGS, INITIAL_SAVE, STORAGE_KEY } from './constants';
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -61,6 +61,12 @@ export function loadGameSave(): SaveData {
       bestBossRushTime:
         typeof parsed.bestBossRushTime === 'number' && parsed.bossRushRoster === BOSS_RUSH_ORDER.length ? parsed.bestBossRushTime : 0,
       bossRushRoster: BOSS_RUSH_ORDER.length,
+      // Older saves: a full clear on record unlocks the whole roster
+      bossRushDefeated: Array.isArray(parsed.bossRushDefeated)
+        ? parsed.bossRushDefeated.filter((k: unknown) => BOSS_RUSH_ORDER.includes(k as BossKind))
+        : typeof parsed.bestBossRushTime === 'number' && parsed.bestBossRushTime > 0
+        ? [...BOSS_RUSH_ORDER]
+        : [],
       dailyQuests:
         isObj(parsed.dailyQuests) &&
         isArr3(parsed.dailyQuests.ids) &&

@@ -181,6 +181,8 @@ export interface SaveData {
   bestBossRushTime: number;
   /** Roster size the fastest time was set with (a longer roster resets it). */
   bossRushRoster: number;
+  /** Bosses beaten in Boss Rush: a later run may start from any of them. */
+  bossRushDefeated: BossKind[];
   bestCombo: number;
   bestFeverInRun: number;
   totalRuns: number;

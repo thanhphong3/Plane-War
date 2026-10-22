@@ -206,6 +206,11 @@ export const NeonGame: React.FC = () => {
   const gameModeRef = useRef<GameMode>('endless');
   gameModeRef.current = gameMode;
 
+  // Boss Rush: roster index the next Rush starts from (any boss already beaten in a Rush)
+  const [bossRushStart, setBossRushStart] = useState(0);
+  const bossRushStartRef = useRef(0);
+  bossRushStartRef.current = bossRushStart;
+
   // Campaign
   const [levelIndex, setLevelIndex] = useState(0);
   const levelIndexRef = useRef(0);
@@ -651,7 +656,15 @@ export const NeonGame: React.FC = () => {
     e.bossKillsThisRun++;
     e.bossKillTimes.push(e.elapsedRunTime);
     e.nextBossTime = e.elapsedRunTime + (e.modifiers.includes('early_boss') ? 35 : 60);
-    if (rush) e.bossRushIndex++;
+    if (rush) {
+      e.bossRushIndex++;
+      // Beating a boss in the Rush unlocks it as a starting point for later Rushes
+      const cur = saveDataRef.current;
+      if (!cur.bossRushDefeated.includes(b.kind)) {
+        updateSave({ ...cur, bossRushDefeated: [...cur.bossRushDefeated, b.kind] });
+        if (e.bossRushIndex > 1) showToast(tr(`Unlocked: start a Rush from ${b.name}`, `Đã mở khóa: Boss Rush bắt đầu từ ${b.name}`));
+      }
+    }
     const rushWon = rush && e.bossRushIndex >= BOSS_RUSH_ORDER.length;
     /** The fight that ends the run: the whole field goes quiet. */
     const finale = campaign || rushWon;
@@ -744,7 +757,7 @@ export const NeonGame: React.FC = () => {
     );
     advanceQuest('boss', 1);
     refreshMusic();
-  }, [addShockwave, addFloatingText, addPts, advanceQuest, flashScreen, maxShields, refreshMusic, showCenterBanner, spawnParticles]);
+  }, [addShockwave, addFloatingText, addPts, advanceQuest, flashScreen, maxShields, refreshMusic, showCenterBanner, spawnParticles, updateSave, showToast]);
 
   const triggerEmp = useCallback(() => {
     if (gameStateRef.current !== 'PLAYING') return;
@@ -1477,10 +1490,12 @@ export const NeonGame: React.FC = () => {
       const today = currentDaily(cur, runDay);
       const sameDay = !isDaily || cur.daily.date === today.date || dayKey() === today.date;
       const previousBest = campaign ? 0 : isDaily ? today.best : cur[bestKey];
-      const isNewRecord = !campaign && finalScore > previousBest;
+      // A Rush started from a later boss is practice: records and the clear bounty need the full gauntlet
+      const lateStart = rush && e.bossRushStart > 0;
+      const isNewRecord = !campaign && !lateStart && finalScore > previousBest;
 
       // Boss Rush: a full clear pays a big bounty and may set a new fastest time
-      const won = rush && reason === 'victory';
+      const won = rush && !lateStart && reason === 'victory';
       if (won) e.runShardsEarned += 250;
       const clearTime = e.elapsedRunTime;
       const prevTime = cur.bestBossRushTime;
@@ -1493,7 +1508,7 @@ export const NeonGame: React.FC = () => {
       const mastery = masteryReport(cur, e);
       updateSave({
         ...withRunTotals(cur, e, getActiveShip().id),
-        ...(campaign || isDaily ? {} : { [bestKey]: Math.max(previousBest, finalScore) }),
+        ...(campaign || isDaily || lateStart ? {} : { [bestKey]: Math.max(previousBest, finalScore) }),
         ...(newBestTime ? { bestBossRushTime: clearTime, bossRushRoster: BOSS_RUSH_ORDER.length } : {}),
         ...(isDaily && sameDay ? { daily: { ...today, best: Math.max(today.best, finalScore), rewarded: true } } : {}),
         totalRuns: cur.totalRuns + 1,
@@ -1518,6 +1533,7 @@ export const NeonGame: React.FC = () => {
               time: clearTime,
               bestTime: newBestTime ? clearTime : prevTime,
               newBestTime,
+              start: e.bossRushStart,
             }
           : null,
         scoreBy: { ...e.scoreBy },
@@ -1761,6 +1777,11 @@ export const NeonGame: React.FC = () => {
         if (lvl > 1) addFloatingText(p.x, p.y - 30, `${tr('UPGRADED', 'ĐÃ NÂNG')} · LV ${lvl}`, def?.color || '#67e8f9', 14);
       }
       e.perkOffer = [];
+      // Late-start Rush: the catch-up pickers come one after another
+      if (e.bonusPicks > 0) {
+        e.bonusPicks--;
+        if (e.bonusPicks > 0) e.perkPendingTimer = 0.35;
+      }
       // A moment of safety to get your bearings after the freeze
       p.invulnTimer = Math.max(p.invulnTimer, 1.2);
       sound.playSound('perk_pick');
@@ -1862,7 +1883,14 @@ export const NeonGame: React.FC = () => {
     e.bossCount = 0;
     e.bossKillsThisRun = 0;
     e.nextBossTime = tutorial ? Infinity : timed ? 26 : e.modifiers.includes('early_boss') ? 35 : 55;
-    e.bossRushIndex = rush ? 0 : -1;
+    // A Rush may start from any boss already beaten in an earlier Rush
+    const rushStart = bossRushStartRef.current;
+    const startAt =
+      rush && rushStart > 0 && rushStart < BOSS_RUSH_ORDER.length && save.bossRushDefeated.includes(BOSS_RUSH_ORDER[rushStart])
+        ? rushStart
+        : 0;
+    e.bossRushStart = startAt;
+    e.bossRushIndex = rush ? startAt : -1;
     e.bossRushTimer = rush ? 2.4 : 0;
     e.bossRushWon = false;
 
@@ -1872,6 +1900,12 @@ export const NeonGame: React.FC = () => {
     e.perkOffer = [];
     e.perkReason = '';
     e.perkWaveMilestone = 0;
+    // Skipping ahead in the Rush skips the perks those bosses would have paid: catch up on a few now
+    e.bonusPicks = startAt > 0 ? Math.min(3, Math.ceil(startAt / 5)) : 0;
+    if (e.bonusPicks > 0) {
+      e.perkPendingTimer = 0.6;
+      e.perkReason = tr(`Starting at boss ${startAt + 1}`, `Bắt đầu từ boss ${startAt + 1}`);
+    }
     e.grazeCounterForShield = 0;
     e.missileTimer = 0;
     e.decoys = [];
@@ -1953,7 +1987,9 @@ export const NeonGame: React.FC = () => {
         : timed
         ? tr('60 SECOND BLITZ — GO GO GO!', 'TỐC CHIẾN 60 GIÂY — LÊN NÀO!')
         : rush
-        ? tr(`BOSS RUSH — ${BOSS_RUSH_ORDER.length} BOSSES, ONE LIFE`, `BOSS RUSH — ${BOSS_RUSH_ORDER.length} BOSS, MỘT MẠNG`)
+        ? startAt > 0
+          ? tr(`BOSS RUSH — FROM BOSS ${startAt + 1}/${BOSS_RUSH_ORDER.length}`, `BOSS RUSH — TỪ BOSS ${startAt + 1}/${BOSS_RUSH_ORDER.length}`)
+          : tr(`BOSS RUSH — ${BOSS_RUSH_ORDER.length} BOSSES, ONE LIFE`, `BOSS RUSH — ${BOSS_RUSH_ORDER.length} BOSS, MỘT MẠNG`)
         : mode === 'hardcore'
         ? tr('HARDCORE — x2 SHARDS!', 'CỰC HẠN — x2 MẢNH!')
         : tutorial
@@ -3982,6 +4018,8 @@ export const NeonGame: React.FC = () => {
           saveData={saveData}
           gameMode={gameMode}
           onSelectMode={setGameMode}
+          bossRushStart={bossRushStart}
+          onSelectBossRushStart={setBossRushStart}
           onStartGame={() => startGame(false)}
           onStartDaily={() => {
             setGameMode('daily');
