@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CalendarDays, Crown, Flame, House, Play, RotateCcw, Skull, Star, Timer, Trophy, Waves, Wrench, Zap } from 'lucide-react';
-import { LevelDef } from '../game/campaign';
+import { ACTS, LevelDef, actIndexOf, isActFinale } from '../game/campaign';
 import { ScoreSource } from '../game/engine';
 import { tr, numLocale } from '../i18n';
 import { masteryRewardLabel } from '../i18n/content';
@@ -207,7 +207,12 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           </h2>
           <p className="text-xs text-slate-400 mt-1.5 italic">
             {stats.reachedBoss
-              ? tr(`“${level.bossName} still holds the Root Key.”`, `“${level.bossName} vẫn đang giữ Khóa Gốc.”`)
+              ? isActFinale(level.id)
+                ? tr(`“${level.bossName} still stands.”`, `“${level.bossName} vẫn còn đứng vững.”`)
+                : tr(
+                    `“${level.bossName} still holds the ${ACTS[actIndexOf(level.id)].item[0]}.”`,
+                    `“${level.bossName} vẫn đang giữ ${ACTS[actIndexOf(level.id)].item[1]}.”`
+                  )
               : tr('“Signal lost. Rerouting you to the sector entrance.”', '“Mất tín hiệu. Đang đưa bạn về lối vào khu vực.”')}
           </p>
 

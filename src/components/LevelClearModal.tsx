@@ -1,6 +1,6 @@
 import React from 'react';
 import { Check, ChevronRight, Map as MapIcon, RotateCcw, X } from 'lucide-react';
-import { ACT_II_START, LEVELS } from '../game/campaign';
+import { ACTS, LEVELS, actIndexOf, isActFinale } from '../game/campaign';
 import { tr, numLocale } from '../i18n';
 import { localLevel } from '../i18n/content';
 import { sound } from '../utils/audio';
@@ -48,7 +48,10 @@ export const LevelClearModal: React.FC<LevelClearModalProps> = ({ isOpen, stats,
   if (!isOpen || !stats) return null;
   const level = localLevel(LEVELS[stats.levelId]);
   const isFinal = stats.levelId === LEVELS.length - 1;
-  const actOneDone = stats.levelId === ACT_II_START - 1;
+  /** Finished an act with another one to follow. */
+  const actDone = !isFinal && isActFinale(stats.levelId);
+  const act = ACTS[actIndexOf(stats.levelId)];
+  const nextAct = ACTS[actIndexOf(stats.levelId) + 1];
   const newBest = stats.stars > stats.prevStars && stats.prevStars > 0;
 
   return (
@@ -60,8 +63,8 @@ export const LevelClearModal: React.FC<LevelClearModalProps> = ({ isOpen, stats,
         <h2 className="text-2xl sm:text-3xl font-black text-white font-cyber uppercase neon-glow-amber mt-1">
           {isFinal
             ? tr('Campaign Complete', 'Hoàn thành chiến dịch')
-            : actOneDone
-            ? tr('Act I Complete', 'Hoàn thành Hồi I')
+            : actDone
+            ? tr(`${act.code[0]} Complete`, `Hoàn thành ${act.code[1]}`)
             : tr('Sector Cleared', 'Đã giải phóng khu vực')}
         </h2>
 
@@ -121,7 +124,9 @@ export const LevelClearModal: React.FC<LevelClearModalProps> = ({ isOpen, stats,
               }}
               className="w-full py-3.5 rounded-2xl btn-primary text-slate-950 font-black text-base uppercase font-cyber tracking-wider btn-cyber animate-glow flex items-center justify-center gap-2"
             >
-              {actOneDone ? tr('Begin Act II', 'Bắt đầu Hồi II') : tr('Next Sector', 'Khu vực tiếp')} <ChevronRight size={18} />
+              {actDone && nextAct
+                ? tr(`Begin ${nextAct.code[0]}`, `Bắt đầu ${nextAct.code[1]}`)
+                : tr('Next Sector', 'Khu vực tiếp')} <ChevronRight size={18} />
             </button>
           )}
           <div className="grid grid-cols-2 gap-2">

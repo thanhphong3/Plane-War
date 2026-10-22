@@ -2399,6 +2399,1660 @@ const leviathan: BossBehavior = {
   },
 };
 
+// ===========================================================================
+// ACT III — THE OUTER NET
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// BEACON — a lighthouse in the dark. Caught in its beam you are blind and it
+// is armoured; strike from the shadows.
+// ---------------------------------------------------------------------------
+const BEAM_HALF = 0.22;
+
+/** Angles of the searchlight beams currently lit (none while blacked out). */
+function beaconBeams(b: BossEntity): number[] {
+  if (b.v.dark > 0) return [];
+  const beams = [b.v.beam];
+  if (b.v.twin) beams.push(b.v.beam2);
+  return beams;
+}
+
+/** Is the pilot standing in the light? A flare lights the whole sector. */
+function beaconLit(b: BossEntity, api: BossApi): boolean {
+  if (b.v.flare > 0) return true;
+  const a = aimAt(api, b.x, b.y);
+  const half = BEAM_HALF + (b.v.twin ? 0.04 : 0);
+  return beaconBeams(b).some((beam) => Math.abs(angDiff(a, beam)) < half);
+}
+
+const beacon: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(46, api.W * 0.1);
+    b.targetY = Math.max(180, api.H * 0.21);
+    b.v.beam = Math.PI / 2;
+    b.v.beam2 = Math.PI / 2;
+    b.v.sweepT = 0;
+    b.v.spot = 0;
+    b.v.lock = 0;
+    b.v.flare = 0;
+    b.v.dark = 0;
+    b.v.twin = 0;
+    b.v.lit = 0;
+    b.v.blindText = 0;
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    const rage = b.hp / b.maxHp < 0.5;
+    const p = api.player;
+    b.angle += dt * 2;
+    if (b.v.flare > 0) b.v.flare -= dt;
+    if (b.v.dark > 0) b.v.dark -= dt;
+    if (b.v.blindText > 0) b.v.blindText -= dt;
+    if (rage && !b.v.twin) {
+      b.v.twin = 1;
+      api.banner(tr('SECOND LAMP LIT!', 'NGỌN ĐÈN THỨ HAI ĐÃ SÁNG!'), 'neon-glow-pink');
+    }
+
+    // Sweep, or track the pilot once locked on
+    if (b.v.lock > 0) {
+      const d = angDiff(aimAt(api, b.x, b.y), b.v.beam);
+      b.v.beam += Math.max(-3 * dt, Math.min(3 * dt, d));
+    } else {
+      b.v.sweepT += dt * (rage ? 0.95 : 0.75);
+      b.v.beam = Math.PI / 2 + Math.sin(b.v.sweepT) * 1.15;
+    }
+    b.v.beam2 = Math.PI / 2 + Math.sin(b.v.sweepT + Math.PI) * 1.15;
+    const lit = ready && api.alive && beaconLit(b, api);
+    b.v.lit = lit ? 1 : 0;
+
+    b.status =
+      b.v.dark > 0
+        ? tr(`BLACKOUT ${b.v.dark.toFixed(1)}s — strike now!`, `MẤT ĐIỆN ${b.v.dark.toFixed(1)}s — tấn công ngay!`)
+        : b.v.lock > 0
+        ? tr('LOCKED ON — break line of sight!', 'BỊ KHÓA MỤC TIÊU — thoát khỏi tầm nhìn!')
+        : b.v.flare > 0
+        ? tr('FLARE — nowhere to hide!', 'PHÁO SÁNG — không còn chỗ trốn!')
+        : lit
+        ? tr(`SPOTTED ${Math.floor(b.v.spot * 100)}% — get into the dark!`, `BỊ PHÁT HIỆN ${Math.floor(b.v.spot * 100)}% — lẩn vào bóng tối!`)
+        : tr('In the shadows — FIRE! (sneak damage x1.6)', 'Trong bóng tối — BẮN! (sát thương lén x1.6)');
+    if (!ready) return;
+    b.t += dt;
+    b.x = api.W / 2 + Math.sin(b.t * 0.25) * api.W * 0.18;
+    b.y = b.targetY + Math.sin(b.t * 0.8) * 6;
+
+    // Being seen fills the alarm; a full alarm locks the lamp onto you
+    if (b.v.lock > 0) {
+      b.v.lock -= dt;
+      b.v.snipeT -= dt;
+      if (b.v.snipeT <= 0 && api.alive) {
+        b.v.snipeT = 0.55;
+        api.sfx('enemy_shot');
+        fan(api, b.x, b.y, aimAt(api, b.x, b.y), 3, 0.06, 380, { color: '#fef08a', r: 5 });
+      }
+      if (b.v.lock <= 0) b.v.spot = 0;
+    } else if (lit && b.v.flare <= 0) {
+      b.v.spot = Math.min(1, b.v.spot + dt * (rage ? 0.75 : 0.6));
+      if (b.v.spot >= 1) {
+        b.v.lock = 2.6;
+        b.v.snipeT = 0.5;
+        api.sfx('boss_alarm');
+        api.banner(tr('YOU’VE BEEN SPOTTED!', 'BẠN ĐÃ BỊ PHÁT HIỆN!'), 'neon-glow-pink');
+        api.laser(p.x, 'v', 0.9);
+      }
+    } else {
+      b.v.spot = Math.max(0, b.v.spot - dt * 0.35);
+    }
+
+    if (!api.alive || b.v.lock > 0) return;
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    b.attackTimer = rage ? 1.4 : 1.8;
+    const pattern = ['beam', 'rain', 'beam', 'flare'][b.attackIndex++ % 4];
+    api.sfx('enemy_shot');
+    if (pattern === 'beam') {
+      // Shots ride down the beam itself
+      for (const beam of beaconBeams(b)) fan(api, b.x, b.y, beam, rage ? 4 : 3, 0.12, 230, { color: '#fde68a' });
+    } else if (pattern === 'rain') {
+      for (let i = 0; i < 9; i++) api.shot(30 + Math.random() * (api.W - 60), -10, Math.PI / 2, 140 + Math.random() * 60, { color: '#94a3b8', ghost: true });
+    } else {
+      b.v.flare = 2.2;
+      api.flash('#fef9c3', 0.3);
+      ring(api, b.x, b.y, rage ? 20 : 14, 150, b.t, { color: '#fef08a' });
+      api.banner(tr('FLARE!', 'PHÁO SÁNG!'), 'neon-glow-amber');
+    }
+  },
+  bullet(b, api, bl) {
+    if (dist(bl.x, bl.y, b.x, b.y) >= b.r * 0.85) return null;
+    if (b.v.lit) {
+      if (b.v.blindText <= 0) {
+        b.v.blindText = 1.2;
+        api.text(bl.x, bl.y - 10, tr('IT SEES YOU — HIDE!', 'NÓ THẤY BẠN — TRỐN ĐI!'), '#fef08a', 13);
+      }
+      return 'block';
+    }
+    damage(b, api, 1.6 * bulletDmg(bl));
+    return 'hit';
+  },
+  contact(b, api, dashing) {
+    const p = api.player;
+    if (dist(p.x, p.y, b.x, b.y) >= b.r * 0.8 + p.radius) return;
+    if (!dashing) api.hurtPlayer();
+    else if (!b.v.lit) bodyContact(b, api, true, b.x, b.y, b.r, 12, tr('AMBUSH!', 'PHỤC KÍCH!'));
+    else bounce(api, b.x, b.y, tr('DAZZLED!', 'LÓA MẮT!'));
+  },
+  emp(b, api) {
+    b.v.dark = 4;
+    b.v.lock = 0;
+    b.v.spot = 0;
+    api.banner(tr('LAMP SHORTED — BLACKOUT!', 'ĐÈN CHẬP — MẤT ĐIỆN!'), 'neon-glow-amber');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// CIPHER — a memory lock. Watch the nodes light up, then shoot them in the
+// same order to decrypt the core.
+// ---------------------------------------------------------------------------
+const CIPHER_COLORS = ['#22d3ee', '#f472b6', '#fbbf24', '#4ade80'];
+const CIPHER_GLYPHS = ['▲', '■', '●', '◆'];
+const CIPHER_STEP = 0.75;
+/** Hits a node needs, in quick succession, to register (so sweeping past doesn't count). */
+const CIPHER_PRESS = 6;
+
+/** Random node→slot order for the row of nodes. */
+function cipherShuffle(b: BossEntity) {
+  const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+  order.forEach((slot, k) => (b.v[`p${k}`] = slot));
+}
+
+function cipherNewSequence(b: BossEntity) {
+  for (let i = 0; i < 6; i++) {
+    let k = Math.floor(Math.random() * 4);
+    if (i > 0 && k === b.v[`s${i - 1}`]) k = (k + 1 + Math.floor(Math.random() * 3)) % 4;
+    b.v[`s${i}`] = k;
+  }
+  b.v.state = 0;
+  b.v.showT = -0.6;
+  b.v.idx = 0;
+  for (const pt of b.parts) pt.hp = 0;
+}
+
+function cipherWrong(b: BossEntity, api: BossApi, node: BossPart) {
+  api.sfx('glitch');
+  api.shake(10);
+  api.flash('#f43f5e', 0.25);
+  api.text(node.x, node.y - 24, tr('ACCESS DENIED', 'TỪ CHỐI TRUY CẬP'), '#f43f5e', 16);
+  for (const pt of b.parts) ring(api, pt.x, pt.y, 8, 140, b.t, { color: '#f43f5e' });
+  api.laser(api.player.x, 'v', 1);
+  cipherNewSequence(b);
+  b.v.showT = -1.4;
+}
+
+function cipherPress(b: BossEntity, api: BossApi, k: number) {
+  const node = b.parts[k];
+  for (const pt of b.parts) pt.hp = 0;
+  if (k !== b.v[`s${b.v.idx}`]) {
+    cipherWrong(b, api, node);
+    return;
+  }
+  b.v.idx++;
+  node.hitFlash = 0.35;
+  api.sfx('powerup');
+  api.shockwave(node.x, node.y, CIPHER_COLORS[k], 70, 3);
+  api.text(node.x, node.y - 24, `${CIPHER_GLYPHS[k]} ${b.v.idx}/${b.v.len}`, CIPHER_COLORS[k], 16);
+  if (b.v.idx >= b.v.len) {
+    b.v.state = 2;
+    b.v.open = api.hard ? 6 : 7;
+    api.sfx('fever');
+    api.flash('#a78bfa', 0.35);
+    api.slowmo(0.45, 0.3);
+    api.shockwave(b.x, b.y, '#ffffff', 260, 6);
+    api.banner(tr('DECRYPTED — CORE OPEN!', 'ĐÃ GIẢI MÃ — LÕI ĐÃ MỞ!'), 'neon-glow-amber');
+  }
+}
+
+const cipher: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(44, api.W * 0.1);
+    b.targetY = Math.max(190, api.H * 0.24);
+    b.v.len = 3;
+    b.v.slideT = 0;
+    cipherShuffle(b);
+    b.v.open = 0;
+    b.parts = CIPHER_COLORS.map(() => makePart(b.x, b.y, 17, 0));
+    cipherNewSequence(b);
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    const rage = b.hp / b.maxHp < 0.5;
+    b.angle += dt * 0.8;
+    // A row of nodes under the core, so every node can be shot from below
+    b.parts.forEach((pt, k) => {
+      const tx = api.W * (0.2 + 0.2 * b.v[`p${k}`]) + Math.sin(b.t * 1.2 + k) * 8;
+      const ty = b.y + b.r + 58 + Math.sin(b.t * 1.7 + k * 2) * 6;
+      const f = Math.min(1, 6 * dt);
+      pt.x += (tx - pt.x) * f;
+      pt.y += (ty - pt.y) * f;
+      // A node's charge drains if you stop firing at it
+      pt.hp = Math.max(0, pt.hp - dt * 5);
+    });
+
+    if (b.v.state === 0) {
+      b.status = tr('WATCH THE SEQUENCE...', 'GHI NHỚ CHUỖI...');
+    } else if (b.v.state === 1) {
+      b.status = tr(
+        `INPUT ${b.v.idx}/${b.v.len} — shoot the nodes in order (${Math.max(0, b.v.inputT).toFixed(1)}s)`,
+        `NHẬP ${b.v.idx}/${b.v.len} — bắn các nút theo đúng thứ tự (${Math.max(0, b.v.inputT).toFixed(1)}s)`
+      );
+    } else {
+      b.status = tr(`CORE OPEN ${b.v.open.toFixed(1)}s — FIRE!`, `LÕI MỞ ${b.v.open.toFixed(1)}s — BẮN!`);
+    }
+    if (!ready) return;
+    b.t += dt;
+    b.x = api.W / 2 + Math.sin(b.t * 0.3) * api.W * 0.12;
+    b.y = b.targetY + Math.sin(b.t * 0.9) * 8;
+
+    if (b.v.state === 0) {
+      b.v.showT += dt;
+      const step = Math.floor(b.v.showT / CIPHER_STEP);
+      // Which node is lit right now (-1 between flashes)
+      b.v.showing = b.v.showT >= 0 && step < b.v.len && b.v.showT - step * CIPHER_STEP < CIPHER_STEP * 0.7 ? b.v[`s${step}`] : -1;
+      if (b.v.showing >= 0 && step !== b.v.lastStep) {
+        b.v.lastStep = step;
+        api.sfx('comm');
+      }
+      if (step >= b.v.len) {
+        b.v.state = 1;
+        b.v.idx = 0;
+        b.v.lastStep = -1;
+        b.v.inputT = 8 + b.v.len * 1.6;
+        api.sfx('powerup');
+      }
+    } else if (b.v.state === 1) {
+      b.v.showing = -1;
+      b.v.inputT -= dt;
+      if (b.v.inputT <= 0) cipherWrong(b, api, b.parts[b.v[`s${b.v.idx}`]]);
+      // Enraged, the row slides along while you type
+      b.v.slideT += dt;
+      if (rage && b.v.slideT > 3.5) {
+        b.v.slideT = 0;
+        for (let k = 0; k < 4; k++) b.v[`p${k}`] = (b.v[`p${k}`] + 1) % 4;
+        api.sfx('glitch');
+      }
+    } else {
+      b.v.open -= dt;
+      if (b.v.open <= 0) {
+        b.v.len = Math.min(rage ? 5 : 4, b.v.len + 1);
+        cipherShuffle(b);
+        cipherNewSequence(b);
+        api.sfx('boss_alarm');
+        api.banner(tr(`RE-ENCRYPTING — ${b.v.len} SYMBOLS`, `MÃ HÓA LẠI — ${b.v.len} KÝ HIỆU`), 'neon-glow-pink');
+      }
+    }
+
+    if (!api.alive) return;
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    const watching = b.v.state === 0;
+    b.attackTimer = watching ? 2.2 : rage ? 1.3 : 1.7;
+    api.sfx('enemy_shot');
+    const col = { color: '#c4b5fd' };
+    if (watching) {
+      // Gentle while you memorise
+      ring(api, b.x, b.y, 10, 110, b.t, col);
+    } else if (b.attackIndex++ % 2) {
+      fan(api, b.x, b.y, aimAt(api, b.x, b.y), rage ? 5 : 3, 0.2, 220, col);
+    } else {
+      for (const pt of b.parts) api.shot(pt.x, pt.y, aimAt(api, pt.x, pt.y), 190, { color: CIPHER_COLORS[b.parts.indexOf(pt)] });
+    }
+  },
+  bullet(b, api, bl) {
+    // Nodes only catch fire while you're typing the code; otherwise shots pass through to the core
+    for (let k = 0; k < b.parts.length && b.v.state === 1; k++) {
+      const pt = b.parts[k];
+      if (dist(bl.x, bl.y, pt.x, pt.y) >= pt.r + 5) continue;
+      pt.hp += 1;
+      pt.hitFlash = 0.05;
+      if (pt.hp >= CIPHER_PRESS) cipherPress(b, api, k);
+      return 'block';
+    }
+    if (dist(bl.x, bl.y, b.x, b.y) >= b.r * 0.9) return null;
+    if (b.v.state !== 2) return 'block';
+    damage(b, api, 2 * bulletDmg(bl));
+    return 'hit';
+  },
+  contact(b, api, dashing) {
+    const p = api.player;
+    if (dist(p.x, p.y, b.x, b.y) >= b.r * 0.8 + p.radius) return;
+    if (!dashing) api.hurtPlayer();
+    else if (b.v.state === 2) bodyContact(b, api, true, b.x, b.y, b.r, 12, tr('BRUTE FORCE!', 'TẤN CÔNG VÉT CẠN!'));
+    else bounce(api, b.x, b.y, tr('ENCRYPTED!', 'ĐÃ MÃ HÓA!'));
+  },
+  emp(b, api) {
+    // Brute-forces the next symbol
+    if (b.v.state === 1) cipherPress(b, api, b.v[`s${b.v.idx}`]);
+    else if (b.v.state === 2) damage(b, api, b.maxHp * 0.05);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// METRONOME — bullets barely scratch it. Dash into it exactly on the beat.
+// ---------------------------------------------------------------------------
+/** Half-width of the "on the beat" window, in seconds. */
+const BEAT_WINDOW = 0.15;
+
+function beatLen(b: BossEntity) {
+  return b.hp / b.maxHp < 0.5 ? 0.5 : 0.6;
+}
+
+function onBeat(b: BossEntity) {
+  const L = beatLen(b);
+  return b.v.beatT < BEAT_WINDOW || b.v.beatT > L - BEAT_WINDOW;
+}
+
+const metronome: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(46, api.W * 0.105);
+    b.targetY = Math.max(220, api.H * 0.3);
+    b.v.beatT = 0;
+    b.v.beat = 0;
+    b.v.combo = 0;
+    b.v.lane = 1;
+    b.v.pulse = 0;
+    b.v.chipText = 0;
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    if (b.v.pulse > 0) b.v.pulse -= dt;
+    if (b.v.chipText > 0) b.v.chipText -= dt;
+    b.status = tr(
+      `Rhythm x${b.v.combo} — DASH into it ON THE BEAT`,
+      `Nhịp x${b.v.combo} — LƯỚT húc vào nó ĐÚNG NHỊP`
+    );
+    if (!ready) return;
+    b.t += dt;
+    const L = beatLen(b);
+    b.v.beatT += dt;
+    const lanes = [0.25, 0.5, 0.75];
+    const tx = api.W * lanes[b.v.lane];
+    b.x += (tx - b.x) * Math.min(1, 6 * dt);
+    b.y = b.targetY - Math.max(0, b.v.pulse) * 30;
+    if (b.v.beatT < L) return;
+
+    // ---- On the beat ----
+    b.v.beatT -= L;
+    b.v.beat++;
+    b.v.pulse = 0.12;
+    b.angle += Math.PI / 4;
+    api.sfx('hit');
+    const bar = b.v.beat % 4;
+    if (bar === 0) {
+      // Downbeat: hop to a new lane
+      b.v.lane = (b.v.lane + 1 + Math.floor(Math.random() * 2)) % 3;
+    }
+    if (!api.alive) return;
+    const rage = b.hp / b.maxHp < 0.5;
+    const notes = { color: '#f0abfc' };
+    if (bar === 0) ring(api, b.x, b.y, rage ? 20 : 16, 150, b.v.beat * 0.2, notes);
+    else if (bar === 1) fan(api, b.x, b.y, aimAt(api, b.x, b.y), 3, 0.2, 230, notes);
+    else if (bar === 2) ring(api, b.x, b.y, rage ? 14 : 10, 120, b.v.beat * 0.2 + 0.3, { color: '#c4b5fd' });
+    else {
+      api.laser(api.player.x, 'v', L * 2);
+      if (rage) fan(api, b.x, b.y, aimAt(api, b.x, b.y), 5, 0.15, 260, notes);
+    }
+  },
+  bullet(b, api, bl) {
+    if (dist(bl.x, bl.y, b.x, b.y) >= b.r * 0.85) return null;
+    damage(b, api, 0.15 * bulletDmg(bl));
+    if (b.v.chipText <= 0) {
+      b.v.chipText = 1.6;
+      api.text(bl.x, bl.y - 10, tr('DASH ON THE BEAT!', 'LƯỚT ĐÚNG NHỊP!'), '#f0abfc', 12);
+    }
+    return 'hit';
+  },
+  contact(b, api, dashing) {
+    const p = api.player;
+    if (dist(p.x, p.y, b.x, b.y) >= b.r * 0.85 + p.radius) return;
+    if (!dashing) {
+      api.hurtPlayer();
+      return;
+    }
+    if (p.bossContactCd > 0) return;
+    if (onBeat(b)) {
+      p.bossContactCd = 0.4;
+      b.v.combo = Math.min(8, b.v.combo + 1);
+      strikeFx(api, tr(`PERFECT x${b.v.combo}!`, `HOÀN HẢO x${b.v.combo}!`), '#fde047');
+      api.slowmo(0.5, 0.2);
+      api.shockwave(b.x, b.y, '#f0abfc', 200, 5);
+      damage(b, api, b.maxHp * (0.03 + b.v.combo * 0.005));
+      api.pullPlayer(0, 90);
+    } else {
+      b.v.combo = 0;
+      bounce(api, b.x, b.y, tr('OFF-BEAT!', 'LỆCH NHỊP!'));
+      ring(api, b.x, b.y, 10, 170, b.t, { color: '#f43f5e' });
+    }
+  },
+  emp(b, api) {
+    damage(b, api, b.maxHp * 0.05);
+    b.v.combo = Math.min(8, b.v.combo + 2);
+    api.text(b.x, b.y + b.r + 14, tr('TEMPO BOOST +2', 'TĂNG NHỊP +2'), '#fde047', 15);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// MARIONETTE — it fights through puppets. Dash through a string to free a
+// puppet; a freed puppet flies home and blows up in its master's face.
+// ---------------------------------------------------------------------------
+const PUPPET_COLOR = '#fb7185';
+/** Where a yanked puppet is lunging. */
+const puppetLunge = new WeakMap<BossPart, { x: number; y: number }>();
+
+function puppetSpawn(b: BossEntity, api: BossApi) {
+  const pt = makePart(b.x, b.y, 18, 10);
+  pt.a = Math.random() * TAU; // dance phase
+  pt.tx = 0.15 + Math.random() * 0.7; // home column (fraction of W)
+  pt.ty = 0.38 + Math.random() * 0.2; // home row (fraction of H)
+  pt.timer = 0; // lunge clock
+  b.parts.push(pt);
+}
+
+function puppetFree(b: BossEntity, api: BossApi, pt: BossPart) {
+  if (pt.real) return;
+  pt.real = true;
+  pt.timer = 0;
+  api.sfx('parry');
+  api.slowmo(0.45, 0.25);
+  api.shockwave(pt.x, pt.y, '#fde047', 120, 4);
+  api.text(pt.x, pt.y - 26, tr('STRING CUT!', 'ĐỨT DÂY!'), '#fde047', 15);
+  puppetTangle(b, api);
+}
+
+/** Cutting the last string tangles it (breaking puppets with bullets doesn't). */
+function puppetTangle(b: BossEntity, api: BossApi) {
+  if (b.v.tangled > 0 || b.parts.some((pt) => !pt.real)) return;
+  b.v.tangled = api.hard ? 3.5 : 4.5;
+  api.sfx('fever');
+  api.banner(tr('NO STRINGS LEFT — TANGLED!', 'HẾT DÂY — BỊ RỐI!'), 'neon-glow-amber');
+}
+
+const marionette: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(44, api.W * 0.1);
+    b.targetY = Math.max(180, api.H * 0.21);
+    b.v.spawnT = 0;
+    b.v.tangled = 0;
+    for (let i = 0; i < 3; i++) puppetSpawn(b, api);
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    const rage = b.hp / b.maxHp < 0.5;
+    const { W, H } = api;
+    const p = api.player;
+    b.angle += dt;
+    if (b.v.tangled > 0) b.v.tangled -= dt;
+    const strung = b.parts.filter((pt) => !pt.real);
+    b.status =
+      b.v.tangled > 0
+        ? tr(`TANGLED ${b.v.tangled.toFixed(1)}s — FIRE!`, `BỊ RỐI ${b.v.tangled.toFixed(1)}s — BẮN!`)
+        : tr(`${strung.length} strings — DASH THROUGH a string to free its puppet`, `${strung.length} sợi dây — LƯỚT XUYÊN dây để giải thoát con rối`);
+    if (ready) {
+      b.t += dt;
+      b.x = W / 2 + Math.sin(b.t * 0.4) * W * 0.2;
+      b.y = b.targetY + Math.sin(b.t * 1.1) * 8;
+    }
+
+    for (let i = b.parts.length - 1; i >= 0; i--) {
+      const pt = b.parts[i];
+      if (!ready) {
+        pt.x = b.x;
+        pt.y = b.y + 40;
+        continue;
+      }
+      if (pt.real) {
+        // Freed: a short daze, then it dives into the puppeteer
+        pt.timer += dt;
+        if (pt.timer < 0.5) continue;
+        const a = Math.atan2(b.y - pt.y, b.x - pt.x);
+        pt.x += Math.cos(a) * 560 * dt;
+        pt.y += Math.sin(a) * 560 * dt;
+        if (dist(pt.x, pt.y, b.x, b.y) < b.r + pt.r * 0.5) {
+          b.parts.splice(i, 1);
+          api.sfx('boom');
+          api.shake(16);
+          api.flash(PUPPET_COLOR, 0.3);
+          api.shockwave(b.x, b.y, '#fde047', 200, 5);
+          api.particles(b.x, b.y, PUPPET_COLOR, 36, 340, true);
+          api.text(b.x, b.y + b.r + 16, tr('BETRAYED!', 'BỊ PHẢN BỘI!'), '#fde047', 18);
+          damage(b, api, b.maxHp * 0.09);
+          if (b.hp <= 0) return;
+        }
+        continue;
+      }
+      // Strung: dance around its home spot, sometimes yanked at the pilot
+      const hx = W * (pt.tx + Math.sin(b.t * 0.9 + (pt.a || 0)) * 0.1);
+      const hy = H * pt.ty + Math.cos(b.t * 1.3 + (pt.a || 0)) * 30;
+      let tx = hx;
+      let ty = hy;
+      const lunge = puppetLunge.get(pt);
+      if (pt.timer > 0) {
+        pt.timer -= dt;
+        if (pt.timer > 0.6 && lunge) {
+          tx = lunge.x;
+          ty = lunge.y;
+        }
+      }
+      const k = Math.min(1, (pt.timer > 0.6 ? 7 : 3) * dt);
+      pt.x += (tx - pt.x) * k;
+      pt.y += (ty - pt.y) * k;
+      // Dashing through its string cuts it
+      if (api.alive && isDashing(api) && segDist(p.x, p.y, b.x, b.y + b.r * 0.6, pt.x, pt.y) < 12 + p.radius * 0.6) {
+        puppetFree(b, api, pt);
+      }
+    }
+    if (!ready) return;
+
+    // Restring
+    const max = rage ? 4 : 3;
+    b.v.spawnT -= dt;
+    if (b.v.spawnT <= 0 && b.v.tangled <= 0) {
+      b.v.spawnT = rage ? 3 : 3.8;
+      if (b.parts.filter((pt) => !pt.real).length < max) puppetSpawn(b, api);
+    }
+
+    if (!api.alive || b.v.tangled > 0) return;
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    b.attackTimer = rage ? 1.1 : 1.45;
+    const live = b.parts.filter((pt) => !pt.real);
+    const pattern = ['puppets', 'lunge', 'puppets', 'master'][b.attackIndex++ % 4];
+    api.sfx('enemy_shot');
+    if (pattern === 'puppets') {
+      for (const pt of live) fan(api, pt.x, pt.y, aimAt(api, pt.x, pt.y), 2, 0.16, 200, { color: PUPPET_COLOR });
+    } else if (pattern === 'lunge' && live.length) {
+      const pt = live[Math.floor(Math.random() * live.length)];
+      pt.timer = 1.3;
+      puppetLunge.set(pt, { x: p.x, y: p.y });
+      api.sfx('laser_warn');
+    } else {
+      ring(api, b.x, b.y, rage ? 16 : 12, 140, b.t, { color: '#fda4af' });
+    }
+  },
+  bullet(b, api, bl) {
+    for (let i = 0; i < b.parts.length; i++) {
+      const pt = b.parts[i];
+      if (pt.real || dist(bl.x, bl.y, pt.x, pt.y) >= pt.r + 3) continue;
+      pt.hp -= bulletDmg(bl);
+      pt.hitFlash = 0.06;
+      if (pt.hp <= 0) {
+        b.parts.splice(i, 1);
+        api.sfx('boom');
+        api.particles(pt.x, pt.y, PUPPET_COLOR, 18, 240, true);
+        api.text(pt.x, pt.y - 20, tr('PUPPET WASTED', 'PHÍ MẤT CON RỐI'), '#fda4af', 13);
+        b.v.spawnT = Math.min(b.v.spawnT, 1.2);
+      }
+      return 'hit';
+    }
+    if (dist(bl.x, bl.y, b.x, b.y) >= b.r * 0.9) return null;
+    if (b.v.tangled <= 0) return 'block';
+    damage(b, api, 1.3 * bulletDmg(bl));
+    return 'hit';
+  },
+  contact(b, api, dashing) {
+    const p = api.player;
+    for (const pt of b.parts) {
+      if (pt.real || dist(p.x, p.y, pt.x, pt.y) >= pt.r * 0.85 + p.radius * 0.7) continue;
+      if (dashing) puppetFree(b, api, pt);
+      else api.hurtPlayer();
+    }
+    if (dist(p.x, p.y, b.x, b.y) >= b.r * 0.8 + p.radius) return;
+    if (!dashing) api.hurtPlayer();
+    else if (b.v.tangled > 0) bodyContact(b, api, true, b.x, b.y, b.r, 12, tr('CURTAIN CALL!', 'HẠ MÀN!'));
+    else bounce(api, b.x, b.y);
+  },
+  emp(b, api) {
+    for (const pt of b.parts) puppetFree(b, api, pt);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// FRACTAL — the seed of the swarm. Every body splits in two when it breaks,
+// and same-size fragments pull together and MERGE back. Keep them apart.
+// ---------------------------------------------------------------------------
+const FRACTAL_SHARE = [0.36, 0.16, 0.08];
+const FRACTAL_R = [46, 32, 21];
+
+/** HP a fragment of `gen` still represents, its unborn children included. */
+function fractalWorth(b: BossEntity, gen: number): number {
+  let w = 0;
+  for (let g = gen, n = 1; g < FRACTAL_SHARE.length; g++, n *= 2) w += n * FRACTAL_SHARE[g] * b.maxHp;
+  return w;
+}
+
+function fractalPart(b: BossEntity, gen: number, x: number, y: number, hpFrac = 1): BossPart {
+  const pt = makePart(x, y, FRACTAL_R[gen], FRACTAL_SHARE[gen] * b.maxHp * hpFrac);
+  pt.maxHp = FRACTAL_SHARE[gen] * b.maxHp;
+  pt.a = gen;
+  pt.tx = (Math.random() - 0.5) * 60; // velocity
+  pt.ty = (Math.random() - 0.5) * 60;
+  pt.timer = 4; // can't merge yet
+  return pt;
+}
+
+function fractalSync(b: BossEntity, api: BossApi) {
+  b.hp = b.parts.reduce((s, pt) => s + pt.hp + 2 * fractalWorth(b, (pt.a || 0) + 1), 0);
+  if (b.parts.length === 0) {
+    b.hp = 0;
+    api.defeat();
+  } else {
+    // The HUD and the engine's hooks follow the biggest fragment
+    const lead = b.parts.reduce((m, pt) => ((pt.a || 0) < (m.a || 0) ? pt : m), b.parts[0]);
+    b.x = lead.x;
+    b.y = lead.y;
+    b.r = lead.r;
+  }
+}
+
+function fractalHit(b: BossEntity, api: BossApi, pt: BossPart, amount: number) {
+  pt.hp -= amount;
+  pt.hitFlash = 0.06;
+  if (pt.hp > 0) {
+    fractalSync(b, api);
+    return;
+  }
+  const gen = pt.a || 0;
+  b.parts.splice(b.parts.indexOf(pt), 1);
+  api.sfx('boom');
+  api.shake(gen === 0 ? 18 : 10);
+  api.shockwave(pt.x, pt.y, '#c084fc', 160 - gen * 40, 4);
+  api.particles(pt.x, pt.y, '#e9d5ff', 30 - gen * 8, 320, true);
+  if (gen + 1 < FRACTAL_SHARE.length) {
+    for (const s of [-1, 1]) {
+      const c = fractalPart(b, gen + 1, pt.x + s * pt.r * 0.6, pt.y);
+      c.tx = s * 170;
+      c.ty = -40 + Math.random() * 80;
+      b.parts.push(c);
+    }
+    api.text(pt.x, pt.y - pt.r - 10, tr('SPLIT! KEEP APART!', 'TÁCH ĐÔI! GIỮ XA NHAU!'), '#e9d5ff', 15);
+  } else {
+    api.text(pt.x, pt.y - 20, tr('SHATTERED', 'VỠ VỤN'), '#e9d5ff', 13);
+  }
+  fractalSync(b, api);
+}
+
+const fractal: BossBehavior = {
+  setup(b, api) {
+    b.targetY = Math.max(200, api.H * 0.26);
+    b.parts = [fractalPart(b, 0, b.x, b.y)];
+    b.parts[0].timer = 0;
+    b.r = FRACTAL_R[0];
+    b.v.merges = 0;
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    b.angle += dt * 0.7;
+    const { W, H } = api;
+    if (!ready) {
+      b.parts[0].x = b.x;
+      b.parts[0].y = b.y;
+      b.status = '';
+      return;
+    }
+    b.t += dt;
+    const rage = b.hp / b.maxHp < 0.4;
+
+    // Drift, bounce, and pull towards the nearest same-size sibling
+    for (const pt of b.parts) {
+      pt.timer = Math.max(0, pt.timer - dt);
+      const gen = pt.a || 0;
+      let mate: BossPart | null = null;
+      let best = Infinity;
+      for (const q of b.parts) {
+        if (q === pt || q.a !== pt.a) continue;
+        const d = dist(pt.x, pt.y, q.x, q.y);
+        if (d < best) {
+          best = d;
+          mate = q;
+        }
+      }
+      if (mate && pt.timer <= 0 && mate.timer <= 0) {
+        const a = Math.atan2(mate.y - pt.y, mate.x - pt.x);
+        pt.tx += Math.cos(a) * (rage ? 48 : 36) * dt;
+        pt.ty += Math.sin(a) * (rage ? 48 : 36) * dt;
+      } else {
+        pt.tx += Math.sin(b.t * 0.7 + gen + pt.r) * 20 * dt;
+        pt.ty += Math.cos(b.t * 0.6 + pt.r) * 20 * dt;
+      }
+      const sp = Math.hypot(pt.tx, pt.ty);
+      const cap = pt.timer > 0 ? 260 : 90;
+      if (sp > cap) {
+        pt.tx *= cap / sp;
+        pt.ty *= cap / sp;
+      }
+      pt.x += pt.tx * dt;
+      pt.y += pt.ty * dt;
+      if (pt.x < pt.r || pt.x > W - pt.r) pt.tx = -pt.tx;
+      if (pt.y < 70 + pt.r || pt.y > H * 0.58) pt.ty = -pt.ty;
+      pt.x = Math.max(pt.r, Math.min(W - pt.r, pt.x));
+      pt.y = Math.max(70 + pt.r, Math.min(H * 0.58, pt.y));
+    }
+
+    // Merge touching same-size pairs back into their parent
+    outer: for (let i = 0; i < b.parts.length; i++) {
+      for (let j = i + 1; j < b.parts.length; j++) {
+        const p1 = b.parts[i];
+        const p2 = b.parts[j];
+        if (p1.a !== p2.a || !p1.a || p1.timer > 0 || p2.timer > 0) continue;
+        if (dist(p1.x, p1.y, p2.x, p2.y) > (p1.r + p2.r) * 0.5) continue;
+        const parent = fractalPart(b, p1.a - 1, (p1.x + p2.x) / 2, (p1.y + p2.y) / 2, 0.45);
+        parent.timer = 3;
+        b.parts.splice(j, 1);
+        b.parts.splice(i, 1);
+        b.parts.push(parent);
+        b.v.merges++;
+        api.sfx('boss_alarm');
+        api.flash('#c084fc', 0.3);
+        api.shockwave(parent.x, parent.y, '#f0abfc', 200, 5);
+        api.banner(tr('FRAGMENTS MERGED!', 'CÁC MẢNH ĐÃ HỢP NHẤT!'), 'neon-glow-pink');
+        if (b.v.merges === 1) api.comm('iris', tr('Don’t let them touch! Dash into one to knock it away!', 'Đừng để chúng chạm nhau! Lướt húc một mảnh để đẩy nó ra!'));
+        break outer;
+      }
+    }
+    fractalSync(b, api);
+
+    b.status = tr(
+      `${b.parts.length} fragment${b.parts.length > 1 ? 's' : ''} — break them, keep them APART`,
+      `${b.parts.length} mảnh — phá chúng, giữ chúng XA NHAU`
+    );
+
+    if (!api.alive) return;
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    b.attackTimer = Math.max(0.45, (rage ? 1.3 : 1.6) - b.parts.length * 0.15);
+    const pt = b.parts[b.attackIndex++ % b.parts.length];
+    const gen = pt.a || 0;
+    const col = { color: '#d8b4fe' };
+    api.sfx('enemy_shot');
+    if (gen === 0) {
+      ring(api, pt.x, pt.y, rage ? 22 : 18, 150, b.t, col);
+      fan(api, pt.x, pt.y, aimAt(api, pt.x, pt.y), 3, 0.2, 210, col);
+    } else if (gen === 1) fan(api, pt.x, pt.y, aimAt(api, pt.x, pt.y), rage ? 5 : 3, 0.18, 220, col);
+    else api.shot(pt.x, pt.y, aimAt(api, pt.x, pt.y), 260, col);
+  },
+  bullet(b, api, bl) {
+    for (const pt of b.parts) {
+      if (dist(bl.x, bl.y, pt.x, pt.y) >= pt.r * 0.9) continue;
+      fractalHit(b, api, pt, bulletDmg(bl));
+      return 'hit';
+    }
+    return null;
+  },
+  contact(b, api, dashing) {
+    const p = api.player;
+    for (const pt of [...b.parts]) {
+      if (dist(p.x, p.y, pt.x, pt.y) >= pt.r * 0.85 + p.radius * 0.7) continue;
+      if (!dashing) {
+        api.hurtPlayer();
+        return;
+      }
+      if (p.bossContactCd > 0) return;
+      p.bossContactCd = 0.35;
+      // Knock it away and keep it from merging for a while
+      const a = Math.atan2(pt.y - p.y, pt.x - p.x);
+      pt.tx = Math.cos(a) * 320;
+      pt.ty = Math.sin(a) * 320;
+      pt.timer = 3.5;
+      strikeFx(api, tr('SHATTER STRIKE!', 'ĐÒN VỠ VỤN!'), '#e9d5ff');
+      fractalHit(b, api, pt, 8);
+      return;
+    }
+  },
+  emp(b, api) {
+    for (const pt of b.parts) pt.timer = Math.max(pt.timer, 4);
+    for (const pt of [...b.parts]) fractalHit(b, api, pt, pt.maxHp * 0.25);
+    api.banner(tr('EMP — FRAGMENTS SCATTERED!', 'EMP — CÁC MẢNH TẢN RA!'), 'neon-glow-amber');
+  },
+};
+
+// ===========================================================================
+// ACT IV — ORIGIN
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// BLIGHT — corrupts the floor of the sector. The more ground it holds, the
+// tougher it gets; fly over the blight to cleanse it.
+// ---------------------------------------------------------------------------
+const BLIGHT_COLS = 6;
+const BLIGHT_ROWS = 7;
+/** Corruption (0..1) per floor cell, row-major. */
+const blightCells = new WeakMap<BossEntity, Float32Array>();
+
+/** Floor layout, shared with the renderer. */
+function blightLayout(W: number, H: number) {
+  const y0 = H * 0.38;
+  return { y0, cw: W / BLIGHT_COLS, ch: (H - 20 - y0) / BLIGHT_ROWS };
+}
+
+function blightGrid(b: BossEntity): Float32Array {
+  let g = blightCells.get(b);
+  if (!g) {
+    g = new Float32Array(BLIGHT_COLS * BLIGHT_ROWS);
+    blightCells.set(b, g);
+  }
+  return g;
+}
+
+function blightSplat(b: BossEntity, col: number, row: number, amount: number) {
+  const g = blightGrid(b);
+  for (let r = row - 1; r <= row + 1; r++) {
+    for (let c = col - 1; c <= col + 1; c++) {
+      if (c < 0 || r < 0 || c >= BLIGHT_COLS || r >= BLIGHT_ROWS) continue;
+      g[r * BLIGHT_COLS + c] = Math.max(g[r * BLIGHT_COLS + c], amount);
+    }
+  }
+}
+
+function blightCover(b: BossEntity): number {
+  const g = blightGrid(b);
+  let s = 0;
+  for (let i = 0; i < g.length; i++) s += g[i];
+  return s / g.length;
+}
+
+/** Damage multiplier: blight armours it, a purged floor leaves it raw. */
+function blightMult(b: BossEntity): number {
+  const f = blightCover(b);
+  return f < 0.12 ? 1.5 : Math.max(0.25, 1 - f * 1.6);
+}
+
+function blightBomb(b: BossEntity, api: BossApi, col: number, row: number) {
+  const { y0, cw, ch } = blightLayout(api.W, api.H);
+  const m = makePart((col + 0.5) * cw, y0 + (row + 0.5) * ch, 22, 1);
+  m.timer = 1.1;
+  m.a = col;
+  m.tx = row;
+  b.parts.push(m);
+}
+
+const blight: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(50, api.W * 0.11);
+    b.targetY = Math.max(180, api.H * 0.21);
+    b.v.spreadT = 1.4;
+    b.v.puffT = 2.6;
+    b.v.weakText = 0;
+    for (let i = 0; i < 4; i++) blightSplat(b, Math.floor(Math.random() * BLIGHT_COLS), Math.floor(Math.random() * BLIGHT_ROWS), 0.6);
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    const rage = b.hp / b.maxHp < 0.5;
+    const { W, H } = api;
+    const p = api.player;
+    const g = blightGrid(b);
+    const { y0, cw, ch } = blightLayout(W, H);
+    b.angle += dt * 0.6;
+    if (b.v.weakText > 0) b.v.weakText -= dt;
+    const cover = blightCover(b);
+    b.v.cover = cover;
+    b.status =
+      cover < 0.12
+        ? tr('FLOOR PURGED — it’s raw, FIRE! (x1.5)', 'SÀN ĐÃ SẠCH — nó yếu rồi, BẮN! (x1.5)')
+        : tr(
+            `BLIGHT ${Math.round(cover * 100)}% — fly over it to cleanse (damage x${blightMult(b).toFixed(2)})`,
+            `Ô NHIỄM ${Math.round(cover * 100)}% — bay qua để tẩy sạch (sát thương x${blightMult(b).toFixed(2)})`
+          );
+    if (!ready) return;
+    b.t += dt;
+    b.x = W / 2 + Math.sin(b.t * 0.35) * W * 0.22;
+    b.y = b.targetY + Math.sin(b.t) * 8;
+
+    // The pilot cleans whatever they fly over; a Dash scours a 3x3 block
+    if (api.alive && p.y > y0) {
+      const col = Math.floor(p.x / cw);
+      const row = Math.floor((p.y - y0) / ch);
+      for (let r = row - 1; r <= row + 1; r++) {
+        for (let c = col - 1; c <= col + 1; c++) {
+          if (c < 0 || r < 0 || c >= BLIGHT_COLS || r >= BLIGHT_ROWS) continue;
+          const i = r * BLIGHT_COLS + c;
+          if (isDashing(api)) g[i] = 0;
+          else if (r === row && c === col) g[i] = Math.max(0, g[i] - 4 * dt);
+        }
+      }
+    }
+    // Growth and spread
+    for (let i = 0; i < g.length; i++) if (g[i] > 0 && g[i] < 1) g[i] = Math.min(1, g[i] + 0.3 * dt);
+    b.v.spreadT -= dt;
+    if (b.v.spreadT <= 0) {
+      b.v.spreadT = 1.4;
+      const chance = rage ? 0.14 : 0.1;
+      const snapshot = Array.from(g);
+      for (let i = 0; i < snapshot.length; i++) {
+        if (snapshot[i] < 1 || Math.random() > chance) continue;
+        const c = i % BLIGHT_COLS;
+        const r = Math.floor(i / BLIGHT_COLS);
+        const [dc, dr] = [[1, 0], [-1, 0], [0, 1], [0, -1]][Math.floor(Math.random() * 4)];
+        const nc = c + dc;
+        const nr = r + dr;
+        if (nc < 0 || nr < 0 || nc >= BLIGHT_COLS || nr >= BLIGHT_ROWS) continue;
+        g[nr * BLIGHT_COLS + nc] = Math.max(g[nr * BLIGHT_COLS + nc], 0.05);
+      }
+    }
+    // Ripe cells puff spores
+    b.v.puffT -= dt;
+    if (b.v.puffT <= 0 && api.alive) {
+      b.v.puffT = rage ? 2 : 2.6;
+      const ripe: number[] = [];
+      for (let i = 0; i < g.length; i++) if (g[i] >= 1) ripe.push(i);
+      for (let k = 0; k < 2 && ripe.length; k++) {
+        const i = ripe.splice(Math.floor(Math.random() * ripe.length), 1)[0];
+        const x = ((i % BLIGHT_COLS) + 0.5) * cw;
+        const y = y0 + (Math.floor(i / BLIGHT_COLS) + 0.5) * ch;
+        ring(api, x, y, 5, 75, Math.random(), { color: '#bef264', r: 5 });
+      }
+    }
+    // Bombs land
+    for (let i = b.parts.length - 1; i >= 0; i--) {
+      const m = b.parts[i];
+      m.timer -= dt;
+      if (m.timer > 0) continue;
+      b.parts.splice(i, 1);
+      blightSplat(b, m.a || 0, m.tx, 0.4);
+      api.sfx('boom');
+      api.shake(6);
+      api.shockwave(m.x, m.y, '#a3e635', 90, 3);
+      api.particles(m.x, m.y, '#bef264', 16, 200, true);
+      if (api.alive && dist(p.x, p.y, m.x, m.y) < 34 && !isDashing(api)) api.hurtPlayer();
+    }
+
+    if (!api.alive) return;
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    b.attackTimer = rage ? 1.4 : 1.8;
+    const pattern = ['bombs', 'spit', 'bombs', 'ring'][b.attackIndex++ % 4];
+    api.sfx('enemy_shot');
+    if (pattern === 'bombs') {
+      // One on you, the rest anywhere
+      const n = rage ? 3 : 2;
+      for (let k = 0; k < n; k++) {
+        const col = k === 0 ? Math.max(0, Math.min(BLIGHT_COLS - 1, Math.floor(p.x / cw))) : Math.floor(Math.random() * BLIGHT_COLS);
+        const row = k === 0 ? Math.max(0, Math.min(BLIGHT_ROWS - 1, Math.floor((p.y - y0) / ch))) : Math.floor(Math.random() * BLIGHT_ROWS);
+        blightBomb(b, api, col, row);
+      }
+      api.sfx('laser_warn');
+    } else if (pattern === 'spit') {
+      fan(api, b.x, b.y, aimAt(api, b.x, b.y), rage ? 5 : 3, 0.2, 210, { color: '#a3e635' });
+    } else {
+      ring(api, b.x, b.y, rage ? 18 : 14, 140, b.t, { color: '#d9f99d' });
+    }
+  },
+  bullet(b, api, bl) {
+    if (dist(bl.x, bl.y, b.x, b.y) >= b.r * 0.85) return null;
+    const mult = blightMult(b);
+    damage(b, api, mult * bulletDmg(bl));
+    if (mult < 0.5 && b.v.weakText <= 0) {
+      b.v.weakText = 1.6;
+      api.text(bl.x, bl.y - 10, tr('CLEANSE THE FLOOR!', 'TẨY SẠCH MẶT SÀN!'), '#bef264', 12);
+    }
+    return 'hit';
+  },
+  contact(b, api, dashing) {
+    bodyContact(b, api, dashing, b.x, b.y, b.r, 10 * blightMult(b), tr('PURGE STRIKE!', 'ĐÒN THANH TẨY!'));
+  },
+  emp(b, api) {
+    const g = blightGrid(b);
+    for (let i = 0; i < g.length; i++) g[i] *= 0.3;
+    api.banner(tr('EMP — BLIGHT BURNED AWAY!', 'EMP — Ô NHIỄM BỊ ĐỐT SẠCH!'), 'neon-glow-amber');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// DEADEYE — a sniper duel. Dash at the instant it fires, while inside the
+// beam, to COUNTER the shot back into it.
+// ---------------------------------------------------------------------------
+const SNIPE_LOCK = 0.35;
+
+function deadeyePerch(b: BossEntity, api: BossApi) {
+  let x = b.x;
+  for (let k = 0; k < 6 && Math.abs(x - b.x) < api.W * 0.25; k++) x = api.W * (0.15 + Math.random() * 0.7);
+  b.v.px = x;
+  b.v.py = api.H * (0.2 + Math.random() * 0.14);
+}
+
+const deadeye: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(36, api.W * 0.085);
+    b.v.st = 0;
+    b.v.stT = 1.6;
+    b.v.fa = Math.PI / 2;
+    b.v.stun = 0;
+    b.v.tap = 0;
+    b.v.fireFx = 0;
+    b.v.px = api.W / 2;
+    b.v.py = b.targetY;
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    const rage = b.hp / b.maxHp < 0.5;
+    const p = api.player;
+    if (b.v.fireFx > 0) b.v.fireFx -= dt;
+    if (b.v.stun > 0) b.v.stun -= dt;
+    b.status =
+      b.v.stun > 0
+        ? stunnedStatus(b.v.stun)
+        : b.v.st === 0
+        ? tr('SNIPER LOCKING — DASH the instant it fires to COUNTER', 'XẠ THỦ ĐANG NGẮM — LƯỚT đúng lúc nó bóp cò để PHẢN ĐẠN')
+        : tr('Reloading — pressure it!', 'Đang nạp đạn — dồn ép nó!');
+    if (!ready) {
+      b.v.px = b.x;
+      b.v.py = b.targetY;
+      return;
+    }
+    b.t += dt;
+    b.angle += dt;
+    if (b.v.stun > 0) return;
+
+    b.v.stT -= dt;
+    if (b.v.st === 0) {
+      // Aim: track the pilot, then hold still for the last moment so it can be read
+      b.x += (b.v.px - b.x) * Math.min(1, 8 * dt);
+      b.y += (b.v.py - b.y) * Math.min(1, 8 * dt);
+      if (b.v.stT > SNIPE_LOCK) {
+        const d = angDiff(aimAt(api, b.x, b.y), b.v.fa);
+        b.v.fa += Math.max(-5 * dt, Math.min(5 * dt, d));
+      } else if (!b.v.locked) {
+        b.v.locked = 1;
+        api.sfx('snipe_lock');
+      }
+      if (b.v.stT <= 0) {
+        b.v.locked = 0;
+        b.v.fireFx = 0.3;
+        api.sfx('snipe');
+        const ex = b.x + Math.cos(b.v.fa) * 1500;
+        const ey = b.y + Math.sin(b.v.fa) * 1500;
+        b.v.ex = ex;
+        b.v.ey = ey;
+        if (api.alive && segDist(p.x, p.y, b.x, b.y, ex, ey) < 12 + p.radius * 0.6) {
+          if (isDashing(api)) {
+            b.v.stun = api.hard ? 1.8 : 2.2;
+            b.v.countered = 1;
+            api.slowmo(0.3, 0.45);
+            api.flash('#ffffff', 0.4);
+            api.shake(18);
+            api.shockwave(p.x, p.y, '#fde047', 160, 5);
+            api.shockwave(b.x, b.y, '#f87171', 220, 6);
+            api.text(p.x, p.y - 30, tr('COUNTERSHOT!', 'PHẢN ĐẠN!'), '#fde047', 20);
+            api.banner(tr('COUNTERSHOT — DEADEYE STUNNED!', 'PHẢN ĐẠN — DEADEYE BỊ CHOÁNG!'), 'neon-glow-amber');
+            damage(b, api, b.maxHp * 0.1);
+          } else {
+            api.hurtPlayer();
+          }
+        } else b.v.countered = 0;
+        b.v.st = 1;
+        b.v.stT = rage ? 0.8 : 1.1;
+        api.sfx('enemy_shot');
+        fan(api, b.x, b.y, aimAt(api, b.x, b.y), rage ? 5 : 3, 0.22, 200, { color: '#fca5a5' });
+      }
+    } else if (b.v.st === 1) {
+      if (b.v.stT <= 0) {
+        if (rage && !b.v.tap) {
+          // Double tap: a faster second shot from the same perch
+          b.v.tap = 1;
+          b.v.st = 0;
+          b.v.stT = 0.85;
+        } else {
+          b.v.tap = 0;
+          b.v.st = 2;
+          b.v.stT = 0.45;
+          api.sfx('glitch');
+        }
+      }
+    } else if (b.v.stT <= 0) {
+      deadeyePerch(b, api);
+      b.x = b.v.px;
+      b.y = b.v.py;
+      b.v.fa = aimAt(api, b.x, b.y);
+      b.v.st = 0;
+      b.v.stT = rage ? 1.15 : 1.45;
+      api.shockwave(b.x, b.y, '#f87171', 90, 3);
+    }
+  },
+  bullet(b, api, bl) {
+    if (b.v.st === 2 && b.v.stun <= 0) return null; // blinking out
+    if (dist(bl.x, bl.y, b.x, b.y) >= b.r * 0.9) return null;
+    damage(b, api, (b.v.stun > 0 ? 1.5 : 0.6) * bulletDmg(bl));
+    return 'hit';
+  },
+  contact(b, api, dashing) {
+    if (b.v.st === 2 && b.v.stun <= 0) return;
+    bodyContact(b, api, dashing, b.x, b.y, b.r, b.v.stun > 0 ? 12 : 6, tr('POINT BLANK!', 'ĐÒN SÁT NÚT!'));
+  },
+  emp(b, api) {
+    b.v.stun = Math.max(b.v.stun, 2.2);
+    b.v.st = 1;
+    b.v.stT = 0.8;
+    b.v.locked = 0;
+    api.banner(tr('EMP — SCOPE FRIED!', 'EMP — ỐNG NGẮM CHÁY!'), 'neon-glow-amber');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// SIEGEBREAKER — shells IRIS's relay. Stay close to shield it; a full relay
+// fires the Grid Cannon.
+// ---------------------------------------------------------------------------
+const RELAY_COVER = 90;
+
+function relayPos(api: BossApi) {
+  return { x: api.W / 2, y: api.H * 0.86 };
+}
+
+const siege: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(54, api.W * 0.12);
+    b.targetY = Math.max(185, api.H * 0.22);
+    b.v.charge = 20;
+    b.v.stun = 0;
+    b.v.cannonFx = 0;
+    b.v.nodeHit = 0;
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    const rage = b.hp / b.maxHp < 0.5;
+    const p = api.player;
+    const node = relayPos(api);
+    b.v.nx = node.x;
+    b.v.ny = node.y;
+    if (b.v.stun > 0) b.v.stun -= dt;
+    if (b.v.cannonFx > 0) b.v.cannonFx -= dt;
+    if (b.v.nodeHit > 0) b.v.nodeHit -= dt;
+    const covered = api.alive && dist(p.x, p.y, node.x, node.y) < RELAY_COVER;
+    b.v.covered = covered ? 1 : 0;
+    b.status =
+      b.v.stun > 0
+        ? stunnedStatus(b.v.stun)
+        : tr(
+            `RELAY ${Math.floor(b.v.charge)}% — ${covered ? 'SHIELDED' : 'stay close to shield it'}`,
+            `TRẠM ${Math.floor(b.v.charge)}% — ${covered ? 'ĐANG CHE CHẮN' : 'ở gần để che chắn'}`
+          );
+    if (!ready) return;
+    b.t += dt;
+    b.x = api.W / 2 + Math.sin(b.t * 0.3) * api.W * 0.25;
+    b.y = b.targetY + Math.sin(b.t * 0.9) * 6;
+
+    // Shells: the shield eats them, the relay takes the rest
+    for (let i = api.hazards.length - 1; i >= 0; i--) {
+      const h = api.hazards[i];
+      if (h.type !== 'shot' && h.type !== 'drone') continue;
+      const d = dist(h.x, h.y, node.x, node.y);
+      if (covered && h.type === 'shot' && d < RELAY_COVER - 10) {
+        api.hazards.splice(i, 1);
+        api.particles(h.x, h.y, '#67e8f9', 3, 90);
+        continue;
+      }
+      if (d < (h.type === 'drone' ? 28 : 22)) {
+        api.hazards.splice(i, 1);
+        b.v.charge = Math.max(0, b.v.charge - (h.type === 'drone' ? 20 : 12));
+        b.v.nodeHit = 0.25;
+        api.sfx('block');
+        api.particles(node.x, node.y, '#fb923c', 10, 200, true);
+      }
+    }
+    // Charge, then fire the Grid Cannon
+    b.v.charge = Math.min(100, b.v.charge + dt * (rage ? 6.5 : 7.5));
+    if (b.v.charge >= 100) {
+      b.v.charge = 0;
+      b.v.stun = 1.6;
+      b.v.cannonFx = 0.6;
+      api.sfx('fever');
+      api.flash('#67e8f9', 0.45);
+      api.shake(20);
+      api.slowmo(0.4, 0.35);
+      api.shockwave(b.x, b.y, '#67e8f9', 260, 7);
+      api.particles(b.x, b.y, '#a5f3fc', 40, 360, true);
+      api.banner(tr('GRID CANNON FIRES!', 'PHÁO LƯỚI KHAI HỎA!'), 'neon-glow-amber');
+      damage(b, api, b.maxHp * 0.13);
+      if (b.hp <= 0) return;
+    }
+
+    if (!api.alive || b.v.stun > 0) return;
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    b.attackTimer = rage ? 1.25 : 1.6;
+    const pattern = ['shells', 'player', 'sappers', 'shells', 'barrage'][b.attackIndex++ % 5];
+    api.sfx('enemy_shot');
+    const shell = { color: '#fb923c', r: 7 };
+    if (pattern === 'shells') {
+      fan(api, b.x, b.y, Math.atan2(node.y - b.y, node.x - b.x), rage ? 5 : 3, 0.1, 200, shell);
+    } else if (pattern === 'player') {
+      fan(api, b.x, b.y, aimAt(api, b.x, b.y), 3, 0.2, 230, { color: '#fdba74' });
+    } else if (pattern === 'sappers') {
+      for (let k = 0; k < (rage ? 4 : 3); k++) {
+        const x = 40 + Math.random() * (api.W - 80);
+        const y = -20 - k * 30;
+        const a = Math.atan2(node.y - y, node.x - x);
+        api.drone(x, y, Math.cos(a) * 120, Math.sin(a) * 120);
+      }
+      api.banner(tr('SAPPERS INBOUND — protect the relay!', 'ĐỘI PHÁ HOẠI ĐANG TỚI — bảo vệ trạm!'), 'neon-glow-pink');
+    } else {
+      ring(api, b.x, b.y, rage ? 18 : 14, 140, b.t, shell);
+    }
+  },
+  bullet(b, api, bl) {
+    if (dist(bl.x, bl.y, b.x, b.y) >= b.r * 0.85) return null;
+    damage(b, api, (b.v.stun > 0 ? 1.5 : 0.7) * bulletDmg(bl));
+    return 'hit';
+  },
+  contact(b, api, dashing) {
+    bodyContact(b, api, dashing, b.x, b.y, b.r, 10, tr('TREAD BREAKER!', 'ĐÒN PHÁ XÍCH!'));
+  },
+  emp(b, api) {
+    b.v.charge = Math.min(99, b.v.charge + 35);
+    api.text(b.v.nx, b.v.ny - 40, tr('RELAY +35%', 'TRẠM +35%'), '#67e8f9', 16);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// BREAKER — arcade rules. Bullets do nothing: your ship is the paddle, and
+// only the ball breaks bricks and core.
+// ---------------------------------------------------------------------------
+const BRICK_COLS = 7;
+const BRICK_ROWS = 3;
+const BALL_R = 10;
+const BRICK_COLORS = ['#f472b6', '#fbbf24', '#38bdf8'];
+
+function brickLayout(b: BossEntity, api: { W: number }) {
+  const bw = (api.W * 0.8) / BRICK_COLS;
+  return { bw, bh: 16, x0: b.x - (bw * BRICK_COLS) / 2, y0: b.y + b.r + 16 };
+}
+
+function brickAt(b: BossEntity, slot: number): BossPart {
+  const pt = makePart(0, 0, 10, 1);
+  pt.a = slot;
+  return pt;
+}
+
+function breakerServe(b: BossEntity, api: BossApi) {
+  const p = api.player;
+  b.v.ball = 1;
+  b.v.bx = p.x;
+  b.v.by = p.y - 40;
+  b.v.bspd = 300;
+  b.v.power = 0;
+  const a = -Math.PI / 2 + (Math.random() - 0.5) * 0.8;
+  b.v.bvx = Math.cos(a) * b.v.bspd;
+  b.v.bvy = Math.sin(a) * b.v.bspd;
+}
+
+function breakerStep(b: BossEntity, api: BossApi, dt: number) {
+  const { W, H } = api;
+  const p = api.player;
+  b.v.bx += b.v.bvx * dt;
+  b.v.by += b.v.bvy * dt;
+  if (b.v.bx < BALL_R) b.v.bvx = Math.abs(b.v.bvx);
+  if (b.v.bx > W - BALL_R) b.v.bvx = -Math.abs(b.v.bvx);
+  if (b.v.by < 70) b.v.bvy = Math.abs(b.v.bvy);
+  if (b.v.by > H + 20) {
+    b.v.ball = 0;
+    b.v.ballT = 1.3;
+    api.sfx('glitch');
+    api.text(W / 2, H * 0.6, tr('BALL LOST — the wall rebuilds!', 'MẤT BÓNG — bức tường xây lại!'), '#f43f5e', 16);
+    for (let k = 0; k < 2; k++) breakerRebuild(b);
+    return;
+  }
+  // Paddle: where it lands on the ship sets the angle; a Dash smashes a power ball
+  const reach = p.radius + 14;
+  if (api.alive && b.v.bvy > 0 && dist(b.v.bx, b.v.by, p.x, p.y) < reach) {
+    const off = Math.max(-1, Math.min(1, (b.v.bx - p.x) / reach));
+    const a = -Math.PI / 2 + off * 1.05;
+    b.v.bspd = Math.min(600, b.v.bspd + 14);
+    const power = isDashing(api);
+    const sp = b.v.bspd * (power ? 1.3 : 1);
+    b.v.bvx = Math.cos(a) * sp;
+    b.v.bvy = Math.sin(a) * sp;
+    b.v.by = p.y - reach;
+    b.v.power = power ? 1 : 0;
+    api.sfx(power ? 'parry' : 'hit');
+    if (power) api.text(p.x, p.y - 30, tr('POWER BALL!', 'BÓNG SIÊU CẤP!'), '#fde047', 15);
+  }
+  // Bricks
+  const { bw, bh, x0, y0 } = brickLayout(b, api);
+  for (let i = b.parts.length - 1; i >= 0; i--) {
+    const pt = b.parts[i];
+    const slot = pt.a || 0;
+    const cx = x0 + ((slot % BRICK_COLS) + 0.5) * bw;
+    const cy = y0 + (Math.floor(slot / BRICK_COLS) + 0.5) * (bh + 5);
+    const nx = Math.max(cx - bw / 2, Math.min(cx + bw / 2, b.v.bx));
+    const ny = Math.max(cy - bh / 2, Math.min(cy + bh / 2, b.v.by));
+    if (dist(nx, ny, b.v.bx, b.v.by) > BALL_R) continue;
+    b.parts.splice(i, 1);
+    api.particles(cx, cy, BRICK_COLORS[Math.floor(slot / BRICK_COLS)], 10, 200, true);
+    api.sfx('block');
+    if (!b.v.power) {
+      if (Math.abs(b.v.bx - cx) / (bw / 2) > Math.abs(b.v.by - cy) / (bh / 2)) b.v.bvx = Math.sign(b.v.bx - cx) * Math.abs(b.v.bvx);
+      else b.v.bvy = Math.sign(b.v.by - cy) * Math.abs(b.v.bvy);
+      break;
+    }
+  }
+  // Core
+  const d = dist(b.v.bx, b.v.by, b.x, b.y);
+  if (d < b.r + BALL_R) {
+    const nx = (b.v.bx - b.x) / (d || 1);
+    const ny = (b.v.by - b.y) / (d || 1);
+    const dot = b.v.bvx * nx + b.v.bvy * ny;
+    if (dot < 0) {
+      b.v.bvx -= 2 * dot * nx;
+      b.v.bvy -= 2 * dot * ny;
+    }
+    b.v.bx = b.x + nx * (b.r + BALL_R + 1);
+    b.v.by = b.y + ny * (b.r + BALL_R + 1);
+    const big = !!b.v.power;
+    b.v.power = 0;
+    api.sfx('boom');
+    api.shake(big ? 18 : 12);
+    api.flash('#38bdf8', big ? 0.35 : 0.2);
+    api.shockwave(b.x, b.y, '#7dd3fc', big ? 240 : 160, 5);
+    api.text(b.x, b.y + b.r + 14, big ? tr('MEGA HIT!', 'CÚ ĐÁNH KHỦNG!') : tr('CORE HIT!', 'TRÚNG LÕI!'), '#fde047', big ? 20 : 16);
+    damage(b, api, b.maxHp * (big ? 0.13 : 0.065));
+  }
+}
+
+function breakerRebuild(b: BossEntity) {
+  const used = new Set(b.parts.map((pt) => pt.a));
+  const free: number[] = [];
+  for (let s = 0; s < BRICK_COLS * BRICK_ROWS; s++) if (!used.has(s)) free.push(s);
+  if (free.length) b.parts.push(brickAt(b, free[Math.floor(Math.random() * free.length)]));
+}
+
+const breaker: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(34, api.W * 0.08);
+    b.targetY = Math.max(185, api.H * 0.22);
+    b.parts = [];
+    for (let s = 0; s < BRICK_COLS * BRICK_ROWS; s++) b.parts.push(brickAt(b, s));
+    b.v.ball = 0;
+    b.v.ballT = 1.5;
+    b.v.rebuildT = 7;
+    b.v.blockText = 0;
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    const rage = b.hp / b.maxHp < 0.5;
+    if (b.v.blockText > 0) b.v.blockText -= dt;
+    b.angle += dt;
+    b.status = b.v.ball
+      ? tr(`Bounce the BALL off your ship into the core (bricks ${b.parts.length})`, `Dùng tàu đỡ BÓNG vào lõi (gạch ${b.parts.length})`)
+      : tr('New ball incoming...', 'Bóng mới đang tới...');
+    if (!ready) return;
+    b.t += dt;
+    b.x = api.W / 2 + Math.sin(b.t * 0.35) * api.W * 0.06;
+    b.y = b.targetY;
+
+    if (b.v.ball) {
+      // Two substeps so a fast ball can't tunnel through a brick
+      for (let k = 0; k < 2 && b.v.ball; k++) {
+        breakerStep(b, api, dt / 2);
+        if (b.hp <= 0) return;
+      }
+    } else {
+      b.v.ballT -= dt;
+      if (b.v.ballT <= 0 && api.alive) breakerServe(b, api);
+    }
+    b.v.rebuildT -= dt;
+    if (b.v.rebuildT <= 0) {
+      b.v.rebuildT = rage ? 5 : 7;
+      breakerRebuild(b);
+    }
+
+    if (!api.alive) return;
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    b.attackTimer = rage ? 1.2 : 1.6;
+    const pattern = ['invaders', 'fan', 'invaders', 'ring'][b.attackIndex++ % 4];
+    api.sfx('enemy_shot');
+    const { bw, bh, x0, y0 } = brickLayout(b, api);
+    if (pattern === 'invaders') {
+      for (let k = 0; k < (rage ? 4 : 3) && b.parts.length; k++) {
+        const slot = b.parts[Math.floor(Math.random() * b.parts.length)].a || 0;
+        const x = x0 + ((slot % BRICK_COLS) + 0.5) * bw;
+        const y = y0 + (Math.floor(slot / BRICK_COLS) + 1) * (bh + 5);
+        api.shot(x, y, Math.PI / 2, 190, { color: BRICK_COLORS[Math.floor(slot / BRICK_COLS)], r: 5 });
+      }
+    } else if (pattern === 'fan') {
+      fan(api, b.x, b.y, aimAt(api, b.x, b.y), rage ? 5 : 3, 0.2, 220, { color: '#7dd3fc' });
+    } else {
+      ring(api, b.x, b.y, 12, 130, b.t, { color: '#7dd3fc' });
+    }
+  },
+  bullet(b, api, bl) {
+    const { bw, bh, x0, y0 } = brickLayout(b, api);
+    const inWall = bl.x > x0 && bl.x < x0 + bw * BRICK_COLS && bl.y > y0 && bl.y < y0 + BRICK_ROWS * (bh + 5);
+    const onCore = dist(bl.x, bl.y, b.x, b.y) < b.r * 0.9;
+    if (!onCore && !(inWall && b.parts.some((pt) => {
+      const s = pt.a || 0;
+      return Math.abs(bl.x - (x0 + ((s % BRICK_COLS) + 0.5) * bw)) < bw / 2 && Math.abs(bl.y - (y0 + (Math.floor(s / BRICK_COLS) + 0.5) * (bh + 5))) < bh / 2 + 3;
+    }))) return null;
+    if (b.v.blockText <= 0) {
+      b.v.blockText = 1.8;
+      api.text(bl.x, bl.y + 14, tr('ONLY THE BALL COUNTS', 'CHỈ BÓNG MỚI TÍNH'), '#7dd3fc', 12);
+    }
+    return 'block';
+  },
+  contact(b, api, dashing) {
+    const p = api.player;
+    if (dist(p.x, p.y, b.x, b.y) >= b.r * 0.8 + p.radius) return;
+    if (!dashing) api.hurtPlayer();
+    else bounce(api, b.x, b.y, tr('USE THE BALL!', 'DÙNG BÓNG ĐI!'));
+  },
+  emp(b, api) {
+    if (!b.v.ball) breakerServe(b, api);
+    b.v.power = 1;
+    b.v.bvy = -Math.abs(b.v.bvy);
+    api.banner(tr('EMP — POWER BALL!', 'EMP — BÓNG SIÊU CẤP!'), 'neon-glow-amber');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// ARCHITECT — the designer of every grid. It rewrites the rules of the fight
+// every few seconds; each rule has its own way to hurt it.
+// ---------------------------------------------------------------------------
+const ARCH_RULES = ['blueprint', 'invert', 'pacifist', 'hunt'] as const;
+type ArchRule = (typeof ARCH_RULES)[number];
+const ARCH_GOLD = '#fde047';
+
+function archRule(b: BossEntity): ArchRule {
+  return ARCH_RULES[(b.v.rule || 0) % ARCH_RULES.length];
+}
+
+const ARCH_RULE_TEXT: Record<ArchRule, { banner: [string, string]; line: [string, string] }> = {
+  blueprint: {
+    banner: ['RULE: BLUEPRINT — standard fire', 'LUẬT: BẢN THIẾT KẾ — bắn như thường'],
+    line: ['Back to the original design.', 'Quay về thiết kế gốc.'],
+  },
+  invert: {
+    banner: ['RULE: INVERTED — your shots fire DOWN', 'LUẬT: ĐẢO NGƯỢC — đạn bắn XUỐNG'],
+    line: ['Up is down. Adapt, or be deprecated.', 'Trên là dưới. Thích nghi, hoặc bị loại bỏ.'],
+  },
+  pacifist: {
+    banner: ['RULE: PACIFIST — no guns. GRAZE to hurt it', 'LUẬT: PHI BẠO LỰC — không súng. SƯỢT ĐẠN để gây sát thương'],
+    line: ['Weapons are a design flaw.', 'Vũ khí là một lỗi thiết kế.'],
+  },
+  hunt: {
+    banner: ['RULE: THE HUNT — it flees. RAM it with DASH', 'LUẬT: CUỘC SĂN — nó bỏ chạy. HÚC nó bằng LƯỚT'],
+    line: ['Catch me, if your reflexes allow it.', 'Bắt ta đi, nếu phản xạ cho phép.'],
+  },
+};
+
+function archSetRule(b: BossEntity, api: BossApi) {
+  b.v.ruleT = 0;
+  b.v.trans = 1.4;
+  api.clearShots();
+  api.sfx('boss_alarm');
+  api.flash(ARCH_GOLD, 0.3);
+  api.shockwave(b.x, b.y, ARCH_GOLD, 260, 5);
+  const txt = ARCH_RULE_TEXT[archRule(b)];
+  api.banner(tr(...txt.banner), 'neon-glow-amber');
+  api.comm('architect', tr(...txt.line));
+}
+
+const architect: BossBehavior = {
+  setup(b, api) {
+    b.r = Math.min(52, api.W * 0.12);
+    b.targetY = Math.max(190, api.H * 0.22);
+    b.v.rule = 0;
+    b.v.ruleT = 0;
+    b.v.trans = 0;
+    b.v.scale = 1;
+    b.v.grazeText = 0;
+    b.v.hvx = 160;
+    b.v.hvy = 120;
+  },
+  update(b, api, dt, ready) {
+    decayFlashes(b, dt);
+    const rage = b.hp / b.maxHp < 0.5;
+    const { W, H } = api;
+    const p = api.player;
+    b.angle += dt * 0.5;
+    if (b.v.grazeText > 0) b.v.grazeText -= dt;
+    const rule = archRule(b);
+    b.v.scale += ((rule === 'hunt' && b.v.trans <= 0 ? 0.6 : 1) - b.v.scale) * Math.min(1, 4 * dt);
+    b.status =
+      b.v.trans > 0
+        ? tr('REWRITING THE RULES...', 'ĐANG VIẾT LẠI LUẬT...')
+        : {
+            blueprint: tr('BLUEPRINT — standard rules, fire away', 'BẢN THIẾT KẾ — luật thường, cứ bắn'),
+            invert: tr('INVERTED — get ABOVE it, your shots fire down', 'ĐẢO NGƯỢC — bay LÊN TRÊN nó, đạn bắn xuống'),
+            pacifist: tr('PACIFIST — GRAZE its bullets to hurt it', 'PHI BẠO LỰC — SƯỢT đạn của nó để gây sát thương'),
+            hunt: tr('THE HUNT — RAM it with a Dash', 'CUỘC SĂN — HÚC nó bằng Lướt'),
+          }[rule];
+    if (!ready) return;
+    b.t += dt;
+
+    // Rule clock
+    b.v.ruleT += dt;
+    if (b.v.ruleT > (rage ? 10 : 12.5) && b.v.trans <= 0) {
+      b.v.rule++;
+      archSetRule(b, api);
+      return;
+    }
+    if (b.v.trans > 0) b.v.trans -= dt;
+
+    // Movement per rule
+    if (rule === 'hunt') {
+      // Flee: away from the pilot, bouncing off the walls
+      const a = Math.atan2(b.y - p.y, b.x - p.x);
+      b.v.hvx += Math.cos(a) * 260 * dt;
+      b.v.hvy += Math.sin(a) * 260 * dt;
+      const sp = Math.hypot(b.v.hvx, b.v.hvy);
+      const cap = rage ? 250 : 210;
+      if (sp > cap) {
+        b.v.hvx *= cap / sp;
+        b.v.hvy *= cap / sp;
+      }
+      b.x += b.v.hvx * dt;
+      b.y += b.v.hvy * dt;
+      if (b.x < 50 || b.x > W - 50) b.v.hvx = -b.v.hvx;
+      if (b.y < 90 || b.y > H - 90) b.v.hvy = -b.v.hvy;
+      b.x = Math.max(50, Math.min(W - 50, b.x));
+      b.y = Math.max(90, Math.min(H - 90, b.y));
+    } else {
+      const ty = rule === 'invert' ? H * 0.8 : b.targetY;
+      const tx = W / 2 + Math.sin(b.t * 0.4) * W * 0.22;
+      b.x += (tx - b.x) * Math.min(1, 2.5 * dt);
+      b.y += (ty - b.y) * Math.min(1, 2.5 * dt);
+    }
+
+    // Rule effects on the pilot's weapons
+    if (b.v.trans <= 0 && rule === 'invert') {
+      for (const bl of api.bullets) {
+        if (bl.vy < 0 && bl.kind !== 'homing' && bl.kind !== 'missile') bl.vy = -bl.vy;
+      }
+    } else if (b.v.trans <= 0 && rule === 'pacifist') {
+      api.bullets.length = 0;
+    }
+
+    // Spiral curtain for the pacifist rule
+    if (b.v.burst > 0) {
+      b.v.burstT -= dt;
+      if (b.v.burstT <= 0) {
+        b.v.burstT = 0.12;
+        b.v.burst--;
+        b.v.burstA += 0.35;
+        for (let k = 0; k < 4; k++) api.shot(b.x, b.y, b.v.burstA + (k * TAU) / 4, 115, { color: '#fef08a' });
+      }
+    }
+
+    if (!api.alive || b.v.trans > 0) return;
+    b.attackTimer -= dt;
+    if (b.attackTimer > 0) return;
+    const gold = { color: '#fde68a' };
+    api.sfx('enemy_shot');
+    if (rule === 'blueprint') {
+      b.attackTimer = rage ? 1.3 : 1.7;
+      if (b.attackIndex++ % 2) {
+        api.laser(p.x, 'v');
+        if (rage) api.laser(p.y, 'h', 1.4);
+      } else {
+        ring(api, b.x, b.y, rage ? 18 : 14, 150, b.t, gold);
+      }
+    } else if (rule === 'invert') {
+      b.attackTimer = rage ? 1.1 : 1.4;
+      fan(api, b.x, b.y, aimAt(api, b.x, b.y), rage ? 5 : 3, 0.2, 220, gold);
+    } else if (rule === 'pacifist') {
+      b.attackTimer = 2.4;
+      b.v.burst = rage ? 22 : 18;
+      b.v.burstT = 0;
+      b.v.burstA = b.t;
+    } else {
+      // Drops slow mines as it runs
+      b.attackTimer = rage ? 0.7 : 0.9;
+      api.shot(b.x, b.y, Math.PI / 2 + (Math.random() - 0.5) * 0.6, 45, { color: '#fbbf24', r: 8 });
+    }
+  },
+  bullet(b, api, bl) {
+    if (dist(bl.x, bl.y, b.x, b.y) >= b.r * b.v.scale * 0.85) return null;
+    const rule = archRule(b);
+    if (b.v.trans > 0 || rule === 'hunt') return 'block';
+    damage(b, api, (rule === 'invert' ? 1.2 : 1) * bulletDmg(bl));
+    return 'hit';
+  },
+  contact(b, api, dashing) {
+    if (b.v.trans > 0) return;
+    const p = api.player;
+    const r = b.r * b.v.scale;
+    if (dist(p.x, p.y, b.x, b.y) >= r * 0.85 + p.radius) return;
+    if (!dashing) {
+      api.hurtPlayer();
+      return;
+    }
+    if (archRule(b) === 'hunt') {
+      if (p.bossContactCd > 0) return;
+      p.bossContactCd = 0.4;
+      strikeFx(api, tr('CAUGHT YOU!', 'BẮT ĐƯỢC RỒI!'), ARCH_GOLD);
+      api.slowmo(0.45, 0.25);
+      damage(b, api, b.maxHp * 0.05);
+      // It bolts the other way
+      const a = Math.atan2(b.y - p.y, b.x - p.x);
+      b.v.hvx = Math.cos(a) * 400;
+      b.v.hvy = Math.sin(a) * 400;
+    } else {
+      bodyContact(b, api, true, b.x, b.y, r, 10, tr('OVERRIDE!', 'GHI ĐÈ!'));
+    }
+  },
+  emp(b, api) {
+    damage(b, api, b.maxHp * 0.04);
+    if (b.v.trans <= 0) {
+      b.v.rule++;
+      archSetRule(b, api);
+    }
+  },
+  graze(b, api, amount) {
+    if (archRule(b) !== 'pacifist' || b.v.trans > 0) return;
+    damage(b, api, b.maxHp * 0.0055 * amount);
+    b.hitFlash = 0.08;
+    if (b.v.grazeText <= 0) {
+      b.v.grazeText = 0.8;
+      api.text(api.player.x, api.player.y - 40, tr('GRAZE HURTS IT!', 'SƯỢT LÀM NÓ ĐAU!'), ARCH_GOLD, 13);
+    }
+  },
+};
+
 export const BOSSES: Record<BossKind, BossBehavior> = {
   sentinel,
   gatekeeper,
@@ -2412,7 +4066,19 @@ export const BOSSES: Record<BossKind, BossBehavior> = {
   chronos,
   hydra,
   leviathan,
+  beacon,
+  cipher,
+  metronome,
+  marionette,
+  fractal,
+  blight,
+  deadeye,
+  siege,
+  breaker,
+  architect,
 };
 
 /** Shared with the renderer. */
 export { TWIN_NAMES, MIRROR_ABSORB, polColor, leviMode };
+export { BEAM_HALF, beaconBeams, CIPHER_COLORS, CIPHER_GLYPHS, CIPHER_PRESS, BEAT_WINDOW, beatLen, FRACTAL_R };
+export { BLIGHT_COLS, BLIGHT_ROWS, blightGrid, blightLayout, SNIPE_LOCK, RELAY_COVER, BRICK_COLS, BRICK_COLORS, BALL_R, brickLayout, archRule };

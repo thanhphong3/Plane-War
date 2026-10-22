@@ -512,6 +512,22 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     desc: 'Seal LEVIATHAN and finish Act II of the campaign.',
     icon: 'crown',
     rewardShards: 700,
+    isEligible: (s) => (s.campaignStars[10] || 0) > 0,
+  },
+  {
+    id: 'outernet_clear',
+    title: 'Port Closed',
+    desc: 'Defeat FRACTAL and finish Act III of the campaign.',
+    icon: 'crown',
+    rewardShards: 900,
+    isEligible: (s) => (s.campaignStars[15] || 0) > 0,
+  },
+  {
+    id: 'origin_clear',
+    title: 'The Grid Chooses',
+    desc: 'Overcome the ARCHITECT and finish the whole campaign.',
+    icon: 'crown',
+    rewardShards: 1200,
     isEligible: (s) => (s.campaignStars[LEVELS.length - 1] || 0) > 0,
   },
   {

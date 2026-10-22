@@ -78,7 +78,17 @@ export type BossKind =
   | 'dynamo'
   | 'chronos'
   | 'hydra'
-  | 'leviathan';
+  | 'leviathan'
+  | 'beacon'
+  | 'cipher'
+  | 'metronome'
+  | 'marionette'
+  | 'fractal'
+  | 'blight'
+  | 'deadeye'
+  | 'siege'
+  | 'breaker'
+  | 'architect';
 
 export interface ShipDef {
   id: string;

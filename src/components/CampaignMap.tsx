@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChevronRight, KeyRound, Lock, Skull, Star, X } from 'lucide-react';
-import { ACT_II_START, LEVELS } from '../game/campaign';
+import { ACTS, LEVELS, actFinaleId } from '../game/campaign';
 import { tr } from '../i18n';
 import { localLevel } from '../i18n/content';
 import { SaveData } from '../types/game';
@@ -30,8 +30,7 @@ export const Stars: React.FC<{ count: number; size?: number }> = ({ count, size 
 export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onClose, onSelectLevel }) => {
   useEscape(isOpen, onClose);
   if (!isOpen) return null;
-  const keys = LEVELS.slice(0, 5).filter((l) => (saveData.campaignStars[l.id] || 0) > 0).length;
-  const seals = LEVELS.slice(ACT_II_START, ACT_II_START + 4).filter((l) => (saveData.campaignStars[l.id] || 0) > 0).length;
+  const cleared = (id: number) => (saveData.campaignStars[id] || 0) > 0;
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-md anim-fade">
@@ -41,7 +40,7 @@ export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onCl
             <p className="text-[10px] uppercase tracking-[0.3em] text-rose-300 font-bold font-cyber">{tr('Campaign', 'Chiến dịch')}</p>
             <h2 className="text-2xl font-black text-white font-cyber tracking-wide leading-none mt-0.5">GRIDFALL</h2>
             <p className="text-xs text-slate-400 mt-1">
-              {tr('Reboot NULL. Then seal the Deep Archive.', 'Khởi động lại NULL. Rồi niêm phong Kho Lưu Trữ Sâu.')}
+              {tr('Four acts, from the Core to the Origin.', 'Bốn hồi, từ Lõi tới Khởi Nguyên.')}
             </p>
           </div>
           <button
@@ -57,44 +56,35 @@ export const CampaignMap: React.FC<CampaignMapProps> = ({ isOpen, saveData, onCl
           </button>
         </div>
 
-        <div className="flex items-center gap-2 mb-2 text-[11px] font-bold text-amber-200">
-          <KeyRound size={13} className="text-amber-300" />
-          {tr('Root Keys', 'Khóa Gốc')}
-          <span className="flex gap-1 ml-1">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <span
-                key={i}
-                className={`w-3.5 h-1.5 rounded-full ${i < keys ? 'bg-amber-300 shadow shadow-amber-400/60' : 'bg-slate-700'}`}
-              />
-            ))}
-          </span>
-        </div>
-
         <div className="custom-scroll flex-1 py-1 pr-1">
           <ol className="relative space-y-2.5">
             {LEVELS.map(localLevel).map((lvl, i) => {
               const locked = i > saveData.campaignUnlocked;
               const stars = saveData.campaignStars[lvl.id] || 0;
               const current = !locked && stars === 0;
+              const actIdx = ACTS.findIndex((a) => a.start === i);
+              const act = ACTS[actIdx];
+              const lastOfAct = ACTS.some((a) => a.start === i + 1);
               return (
                 <li key={lvl.id} className="relative">
-                  {i === ACT_II_START && (
-                    <div className="flex items-center justify-between gap-2 pt-2 pb-2.5 pl-1">
-                      <span className="text-[10px] font-black tracking-[0.25em] font-cyber text-teal-300">
-                        {tr('ACT II · DEEP ARCHIVE', 'HỒI II · KHO LƯU TRỮ SÂU')}
+                  {act && (
+                    <div className={`flex items-center justify-between gap-2 pb-2.5 pl-1 ${i > 0 ? 'pt-2' : ''}`}>
+                      <span className="text-[10px] font-black tracking-[0.25em] font-cyber" style={{ color: act.color }}>
+                        {tr(`${act.code[0]} · ${act.name[0]}`, `${act.code[1]} · ${act.name[1]}`).toUpperCase()}
                       </span>
-                      <span className="flex items-center gap-1 text-[10px] font-bold text-teal-200">
-                        {tr('Seals', 'Ấn')}
-                        {[0, 1, 2, 3].map((k) => (
+                      <span className="flex items-center gap-1 text-[10px] font-bold text-slate-300">
+                        <KeyRound size={11} style={{ color: act.color }} />
+                        {Array.from({ length: actFinaleId(actIdx) - act.start }, (_, k) => (
                           <span
                             key={k}
-                            className={`w-3 h-1.5 rounded-full ${k < seals ? 'bg-teal-300 shadow shadow-teal-400/60' : 'bg-slate-700'}`}
+                            className="w-3 h-1.5 rounded-full"
+                            style={{ background: cleared(act.start + k) ? act.color : '#334155' }}
                           />
                         ))}
                       </span>
                     </div>
                   )}
-                  {i < LEVELS.length - 1 && i !== ACT_II_START - 1 && (
+                  {i < LEVELS.length - 1 && !lastOfAct && (
                     <span
                       className="absolute left-[22px] top-12 w-[2px] h-[calc(100%-1.5rem)]"
                       style={{ background: locked ? '#1e293b' : `linear-gradient(${lvl.accent}, ${LEVELS[i + 1].accent})` }}

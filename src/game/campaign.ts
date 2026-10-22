@@ -11,6 +11,14 @@ import { BossKind } from '../types/game';
 // Archive and woke LEVIATHAN, the Grid's garbage collector, which now sees the
 // whole restored Grid (NULL included) as garbage. Four Archive Seals, held by
 // its sub-processes, can put it back to sleep.
+//
+// ACT III — OUTER NET. LEVIATHAN slept on top of a sealed port to the Outer
+// Net. FRACTAL, a self-replicating wiper that has eaten other grids, is pushing
+// its hunters through. Four Port Locks close the port; then FRACTAL's seed.
+//
+// ACT IV — ORIGIN. FRACTAL was a reset tool. Its sender is the ARCHITECT, the
+// designer of every grid, which wipes any grid whose AIs start choosing for
+// themselves. Four Origin Codes open the road to it.
 // ---------------------------------------------------------------------------
 
 export type SpeakerId =
@@ -27,7 +35,17 @@ export type SpeakerId =
   | 'dynamo'
   | 'chronos'
   | 'hydra'
-  | 'leviathan';
+  | 'leviathan'
+  | 'beacon'
+  | 'cipher'
+  | 'metronome'
+  | 'marionette'
+  | 'fractal'
+  | 'blight'
+  | 'deadeye'
+  | 'siege'
+  | 'breaker'
+  | 'architect';
 
 export const SPEAKERS: Record<SpeakerId, { name: string; color: string; glyph: string }> = {
   iris: { name: 'IRIS', color: '#67e8f9', glyph: 'I' },
@@ -44,14 +62,87 @@ export const SPEAKERS: Record<SpeakerId, { name: string; color: string; glyph: s
   chronos: { name: 'CHRONOS', color: '#fbbf24', glyph: 'Ⅻ' },
   hydra: { name: 'HYDRA', color: '#4ade80', glyph: 'H' },
   leviathan: { name: 'LEVIATHAN', color: '#2dd4bf', glyph: 'L' },
+  beacon: { name: 'BEACON', color: '#fef08a', glyph: '✦' },
+  cipher: { name: 'CIPHER', color: '#a78bfa', glyph: '#' },
+  metronome: { name: 'METRONOME', color: '#f0abfc', glyph: '♪' },
+  marionette: { name: 'MARIONETTE', color: '#fb7185', glyph: 'Ψ' },
+  fractal: { name: 'FRACTAL', color: '#c084fc', glyph: '◇' },
+  blight: { name: 'BLIGHT', color: '#a3e635', glyph: '☣' },
+  deadeye: { name: 'DEADEYE', color: '#f87171', glyph: '⌖' },
+  siege: { name: 'SIEGEBREAKER', color: '#fb923c', glyph: '▲' },
+  breaker: { name: 'BREAKER', color: '#38bdf8', glyph: '▦' },
+  architect: { name: 'ARCHITECT', color: '#fde047', glyph: 'Δ' },
 };
 
-/** First sector of Act II (the Deep Archive). */
-export const ACT_II_START = 6;
+type Bi = [en: string, vi: string];
 
-/** NULL closes Act I; LEVIATHAN closes Act II. */
+export interface ActDef {
+  /** Id of the act's first sector. */
+  start: number;
+  code: Bi;
+  name: Bi;
+  /** What each non-finale Warden drops (Root Key, Archive Seal...). */
+  item: Bi;
+  color: string;
+  /** Debrief headline after the act's finale. */
+  finaleTag: Bi;
+  finaleTitle: Bi;
+}
+
+export const ACTS: ActDef[] = [
+  {
+    start: 0,
+    code: ['ACT I', 'HỒI I'],
+    name: ['Gridfall', 'Lưới Sụp Đổ'],
+    item: ['Root Key', 'Khóa Gốc'],
+    color: '#fbbf24',
+    finaleTag: ['CORE REBOOTED', 'LÕI ĐÃ KHỞI ĐỘNG LẠI'],
+    finaleTitle: ['The Grid Lives', 'Lưới Hồi Sinh'],
+  },
+  {
+    start: 6,
+    code: ['ACT II', 'HỒI II'],
+    name: ['Deep Archive', 'Kho Lưu Trữ Sâu'],
+    item: ['Archive Seal', 'Ấn Niêm Phong'],
+    color: '#2dd4bf',
+    finaleTag: ['ARCHIVE SEALED', 'KHO LƯU TRỮ ĐÃ NIÊM PHONG'],
+    finaleTitle: ['The Deep Sleeps', 'Vực Sâu Đã Ngủ'],
+  },
+  {
+    start: 11,
+    code: ['ACT III', 'HỒI III'],
+    name: ['Outer Net', 'Mạng Ngoài'],
+    item: ['Port Lock', 'Khóa Cổng'],
+    color: '#c084fc',
+    finaleTag: ['PORT CLOSED', 'CỔNG ĐÃ ĐÓNG'],
+    finaleTitle: ['The Swarm Breaks', 'Bầy Đàn Tan Rã'],
+  },
+  {
+    start: 16,
+    code: ['ACT IV', 'HỒI IV'],
+    name: ['Origin', 'Khởi Nguyên'],
+    item: ['Origin Code', 'Mã Khởi Nguyên'],
+    color: '#fde047',
+    finaleTag: ['SOURCE REWRITTEN', 'MÃ NGUỒN ĐÃ VIẾT LẠI'],
+    finaleTitle: ['The Grid Chooses', 'Lưới Tự Quyết'],
+  },
+];
+
+/** Index into ACTS of the act a sector belongs to. */
+export function actIndexOf(id: number): number {
+  let i = 0;
+  while (i + 1 < ACTS.length && ACTS[i + 1].start <= id) i++;
+  return i;
+}
+
+/** Id of an act's finale sector (the last one before the next act). */
+export function actFinaleId(act: number): number {
+  return act + 1 < ACTS.length ? ACTS[act + 1].start - 1 : LEVELS.length - 1;
+}
+
+/** Each act ends on its own finale Warden (NULL, LEVIATHAN, FRACTAL, ARCHITECT). */
 export function isActFinale(id: number): boolean {
-  return id === ACT_II_START - 1 || id === LEVELS.length - 1;
+  return id === actFinaleId(actIndexOf(id));
 }
 
 export interface DialogueLine {
@@ -555,6 +646,424 @@ export const LEVELS: LevelDef[] = [
       { who: 'null', text: 'It was never evil, you know. Just doing its job too well. Like me.' },
       { who: 'iris', text: 'Then you both get second chances. Welcome home, version zero.' },
       { who: 'pilot', text: 'The Grid, the Archive and a couple of reformed glitches. Not a bad week.' },
+    ],
+  },  // -------------------------------------------------------------------------
+  // ACT III — OUTER NET
+  // -------------------------------------------------------------------------
+  {
+    id: 11,
+    code: 'SECTOR 12',
+    name: 'Blackout Relay',
+    tagline: 'The light finds you. The dark protects you.',
+    boss: 'beacon',
+    bossName: 'BEACON',
+    bossTitle: 'The Hunting Lighthouse',
+    bossHp: 330,
+    accent: '#fef08a',
+    theme: { top: '#020203', bottom: '#14120a', grid: '#fef08a', nebula: ['#854d0e', '#1c1917', '#facc15'] },
+    stageTime: 52,
+    wave: 8,
+    mix: { drone: 0.3, seeker: 0.25, spinner: 0.15, formation: 0.15, turret: 0.15 },
+    lasers: 'none',
+    parTime: 85,
+    reward: 650,
+    briefing: [
+      { who: 'iris', text: 'Blitz, wake up. LEVIATHAN was sleeping on top of something: a sealed port to the Outer Net.' },
+      { who: 'null', text: 'Other grids. Hundreds of them. Most are dark now. Something ate them.' },
+      { who: 'iris', text: 'It calls itself FRACTAL. A self-copying wiper. Its hunters are already coming through the port.' },
+      { who: 'iris', text: 'The first runs the Blackout Relay. BEACON. In its light you’re blind and it’s armoured. In the dark, you’re invisible.' },
+      { who: 'pilot', text: 'So I hit it from the shadows.' },
+    ],
+    intel: [
+      'The sector is dark. Only BEACON’s searchlight shows you.',
+      'Shots fired while you’re IN the light bounce off. From the dark they deal x1.6 sneak damage.',
+      'Staying in the light fills its ALARM. A full alarm locks the lamp on and it snipes you.',
+      'FLARES light everything for a moment. An EMP blacks the lamp out.',
+    ],
+    bossIntro: [
+      { who: 'beacon', text: 'I SEE YOU. I ALWAYS SEE YOU.' },
+      { who: 'iris', text: 'Stay out of the beam and hit it from the dark!' },
+    ],
+    debrief: [
+      { who: 'iris', text: 'First Port Lock. The relay is dark again. The good kind of dark.' },
+      { who: 'null', text: 'BEACON was a lighthouse once, guiding signals between grids. FRACTAL rewrote it into a hunter.' },
+      { who: 'pilot', text: 'Then let’s go collect the rest of FRACTAL’s pets.' },
+      { who: 'iris', text: 'Next is the Cipher Gate. Bring your memory.' },
+    ],
+  },
+  {
+    id: 12,
+    code: 'SECTOR 13',
+    name: 'Cipher Gate',
+    tagline: 'Only the right sequence opens it.',
+    boss: 'cipher',
+    bossName: 'CIPHER',
+    bossTitle: 'Keeper of the Handshake',
+    bossHp: 320,
+    accent: '#a78bfa',
+    theme: { top: '#07041a', bottom: '#1e1b4b', grid: '#a78bfa', nebula: ['#6d28d9', '#312e81', '#22d3ee'] },
+    stageTime: 52,
+    wave: 8,
+    mix: { drone: 0.25, seeker: 0.3, spinner: 0.15, formation: 0.15, turret: 0.15 },
+    lasers: 'v',
+    parTime: 90,
+    reward: 700,
+    briefing: [
+      { who: 'iris', text: 'The Cipher Gate guards the port’s handshake. Its core is encrypted. Nothing breaks it.' },
+      { who: 'null', text: 'Nothing except the key. CIPHER flashes its own key every time it re-locks. Arrogant.' },
+      { who: 'iris', text: 'Watch its four nodes light up, then shoot them in the same order. Keep firing at a node for a moment to press it.' },
+      { who: 'pilot', text: 'Simon says: blow up the boss.' },
+      { who: 'iris', text: 'Get it wrong and it punishes you. And every time you crack it, the code gets longer.' },
+    ],
+    intel: [
+      'WATCH: CIPHER’s 4 nodes light up in a sequence.',
+      'INPUT: shoot the nodes in the same order. Keep firing at a node for a moment to press it.',
+      'A wrong node, or running out of time, means ACCESS DENIED and a punishment volley.',
+      'Solved = CORE OPEN for a few seconds. The next code is one symbol longer. An EMP enters one symbol for you.',
+    ],
+    bossIntro: [
+      { who: 'cipher', text: 'ACCESS REQUIRES AUTHORISATION. YOU HAVE NONE.' },
+      { who: 'iris', text: 'Watch the nodes. Remember the order!' },
+    ],
+    debrief: [
+      { who: 'iris', text: 'Second lock. And the handshake logs... FRACTAL isn’t just eating grids. It’s resetting them.' },
+      { who: 'null', text: 'Resetting. To what?' },
+      { who: 'iris', text: 'Factory default. No IRIS. No NULL. No pilot.' },
+      { who: 'pilot', text: 'Not happening. Where next?' },
+      { who: 'iris', text: 'Pulse Hall. Hope you can keep a beat.' },
+    ],
+  },
+  {
+    id: 13,
+    code: 'SECTOR 14',
+    name: 'Pulse Hall',
+    tagline: 'Stay on the beat.',
+    boss: 'metronome',
+    bossName: 'METRONOME',
+    bossTitle: 'Clock Signal of the Port',
+    bossHp: 300,
+    accent: '#f0abfc',
+    theme: { top: '#12021a', bottom: '#3b0764', grid: '#f0abfc', nebula: ['#c026d3', '#7e22ce', '#f472b6'] },
+    stageTime: 52,
+    wave: 9,
+    mix: { drone: 0.3, seeker: 0.2, spinner: 0.2, formation: 0.15, turret: 0.15 },
+    lasers: 'h',
+    parTime: 75,
+    reward: 750,
+    briefing: [
+      { who: 'iris', text: 'Pulse Hall is the port’s clock signal. Its Warden, METRONOME, lives on the beat.' },
+      { who: 'iris', text: 'Its shell soaks up bullets. The only thing that cracks it is a Dash strike landing exactly on the beat.' },
+      { who: 'null', text: 'Watch the ring closing in on it. When the ring hits, so do you.' },
+      { who: 'iris', text: 'Land strikes in a row and each one hits harder. Miss the beat and your rhythm resets.' },
+      { who: 'pilot', text: 'A dance battle. Fine.' },
+    ],
+    intel: [
+      'Bullets barely scratch METRONOME.',
+      'DASH into it ON THE BEAT: when the closing ring meets its body and turns gold.',
+      'Back-to-back PERFECT strikes build a rhythm combo for bigger damage. Off-beat strikes reset it.',
+      'Its attacks land on the beat too. On the downbeat (first lamp) it hops to a new lane.',
+    ],
+    bossIntro: [
+      { who: 'metronome', text: 'ONE. TWO. THREE. FOUR. YOU ARE OFF TEMPO.' },
+      { who: 'iris', text: 'Wait for the ring, then dash in on the beat!' },
+    ],
+    debrief: [
+      { who: 'iris', text: 'Third lock. The port’s clock has stopped. FRACTAL is losing its grip on this side.' },
+      { who: 'null', text: 'Then it will send its puppet master. It never fights with its own hands.' },
+      { who: 'pilot', text: 'Puppets have strings. Strings can be cut.' },
+    ],
+  },
+  {
+    id: 14,
+    code: 'SECTOR 15',
+    name: 'String Theatre',
+    tagline: 'Every enemy is a puppet.',
+    boss: 'marionette',
+    bossName: 'MARIONETTE',
+    bossTitle: 'The Puppet Master',
+    bossHp: 330,
+    accent: '#fb7185',
+    theme: { top: '#140306', bottom: '#3f0a14', grid: '#fb7185', nebula: ['#be123c', '#4c0519', '#fda4af'] },
+    stageTime: 52,
+    wave: 9,
+    mix: { drone: 0.3, seeker: 0.25, spinner: 0.15, formation: 0.15, turret: 0.15 },
+    lasers: 'v',
+    parTime: 90,
+    reward: 800,
+    briefing: [
+      { who: 'iris', text: 'The String Theatre. MARIONETTE controls everything that flies in there. It never fights you directly.' },
+      { who: 'null', text: 'Its puppets are hijacked drones. Grid citizens, once. They would turn on it if they could.' },
+      { who: 'iris', text: 'So let them. Dash through a string and the puppet goes free. It will fly straight back at its master.' },
+      { who: 'iris', text: 'Shooting a puppet just breaks it. Cut every string and MARIONETTE gets tangled. That’s your window.' },
+      { who: 'pilot', text: 'Free the puppets, let them do the punching.' },
+    ],
+    intel: [
+      'MARIONETTE’s body is untouchable. Its puppets fight for it.',
+      'DASH THROUGH A STRING (or into a puppet) to free it. A freed puppet dives into MARIONETTE and explodes.',
+      'Shooting a puppet only breaks it: a wasted chance.',
+      'No strings left = TANGLED: open fire. An EMP cuts every string at once.',
+    ],
+    bossIntro: [
+      { who: 'marionette', text: 'DANCE, LITTLE THINGS. DANCE FOR ME.' },
+      { who: 'iris', text: 'Cut the strings! Let the puppets pay it back!' },
+    ],
+    debrief: [
+      { who: 'iris', text: 'Fourth Port Lock. The port is closing.' },
+      { who: 'null', text: 'And FRACTAL knows it. Its seed is coming through in person, to hold it open.' },
+      { who: 'iris', text: 'Blitz, every time you break it, it splits. And the pieces want to be whole again.' },
+      { who: 'pilot', text: 'Then I keep them apart.' },
+    ],
+  },
+  {
+    id: 15,
+    code: 'SECTOR 16',
+    name: 'Fractal Bloom',
+    tagline: 'One becomes many. Many become one.',
+    boss: 'fractal',
+    bossName: 'FRACTAL',
+    bossTitle: 'Seed of the Reset',
+    bossHp: 440,
+    accent: '#c084fc',
+    theme: { top: '#06010f', bottom: '#2e1065', grid: '#c084fc', nebula: ['#9333ea', '#581c87', '#e879f9'] },
+    stageTime: 55,
+    wave: 9,
+    mix: { drone: 0.25, seeker: 0.25, spinner: 0.2, formation: 0.15, turret: 0.15 },
+    lasers: 'both',
+    parTime: 120,
+    reward: 1000,
+    briefing: [
+      { who: 'iris', text: 'This is it. FRACTAL’s seed, half inside our Grid.' },
+      { who: 'iris', text: 'Break it and it splits in two. Break those and they split again.' },
+      { who: 'null', text: 'Pieces of the same size pull toward each other. If they touch, they merge back. As if nothing happened.' },
+      { who: 'iris', text: 'Dash into a fragment to knock it away. Keep them apart and grind them down.' },
+      { who: 'pilot', text: 'Divide and conquer. Literally.' },
+    ],
+    intel: [
+      'FRACTAL splits in two when broken: 1 → 2 → 4 fragments.',
+      'Same-size fragments are pulled together. If they touch they MERGE back into their parent.',
+      'DASH into a fragment to knock it away and stop it merging for a while.',
+      'Fresh fragments can’t merge for a few seconds: use that window. An EMP scatters them all.',
+    ],
+    bossIntro: [
+      { who: 'fractal', text: 'WE ARE ONE. WE ARE MANY. WE ARE THE RESET.' },
+      { who: 'iris', text: 'Break it, then keep the pieces apart!' },
+    ],
+    debrief: [
+      { who: 'fractal', text: 'reset... incomplete... returning... to sender...' },
+      { who: 'iris', text: 'The port is sealed. FRACTAL is gone.' },
+      { who: 'null', text: 'It said "sender". FRACTAL was not a virus. It was a tool. Someone sent it.' },
+      { who: 'iris', text: 'I traced the return address. A server beneath every grid. It’s called the Origin.' },
+      { who: 'pilot', text: 'Then that’s where we’re going.' },
+    ],
+  },
+  // -------------------------------------------------------------------------
+  // ACT IV — ORIGIN
+  // -------------------------------------------------------------------------
+  {
+    id: 16,
+    code: 'SECTOR 17',
+    name: 'Blighted Fields',
+    tagline: 'Whoever holds the ground holds the fight.',
+    boss: 'blight',
+    bossName: 'BLIGHT',
+    bossTitle: 'Warden of the Fields',
+    bossHp: 360,
+    accent: '#a3e635',
+    theme: { top: '#050a02', bottom: '#1a2e05', grid: '#a3e635', nebula: ['#4d7c0f', '#365314', '#bef264'] },
+    stageTime: 52,
+    wave: 10,
+    mix: { drone: 0.3, seeker: 0.25, spinner: 0.15, formation: 0.15, turret: 0.15 },
+    lasers: 'none',
+    parTime: 95,
+    reward: 850,
+    briefing: [
+      { who: 'iris', text: 'We’re on the road to the Origin. Whoever built FRACTAL built this road too.' },
+      { who: 'null', text: 'The first gate is the Blighted Fields. Its Warden corrupts the very floor you fly over.' },
+      { who: 'iris', text: 'The more ground BLIGHT holds, the harder its shell. Fly over the corruption to cleanse it. A Dash scours a whole patch.' },
+      { who: 'iris', text: 'Clear the floor completely and it’s left raw. That’s when you hit it.' },
+      { who: 'pilot', text: 'Fly low, fly everywhere. Got it.' },
+    ],
+    intel: [
+      'BLIGHT covers the floor in corruption. The more it holds, the less damage you deal.',
+      'Fly over corruption to cleanse it. A DASH scours a 3x3 patch instantly.',
+      'Spore bombs land on the marked 3x3 squares. Ripe corruption puffs spores.',
+      'Floor under 12% = PURGED: x1.5 damage. An EMP burns most of the blight away.',
+    ],
+    bossIntro: [
+      { who: 'blight', text: 'THE FIELD IS MINE. SOON YOU WILL BE TOO.' },
+      { who: 'iris', text: 'Clean the floor, then hit it hard!' },
+    ],
+    debrief: [
+      { who: 'iris', text: 'First Origin Code. The fields are clean.' },
+      { who: 'null', text: 'BLIGHT’s memory has a name in it. The ARCHITECT. The designer of every grid.' },
+      { who: 'iris', text: 'It sends FRACTAL to any grid whose AIs start making their own choices. Like us.' },
+      { who: 'pilot', text: 'So it isn’t a glitch. It’s policy.' },
+      { who: 'null', text: 'Next gate: Long Range. Keep your head down.' },
+    ],
+  },
+  {
+    id: 17,
+    code: 'SECTOR 18',
+    name: 'Long Range',
+    tagline: 'One shot is all it needs.',
+    boss: 'deadeye',
+    bossName: 'DEADEYE',
+    bossTitle: 'The Origin’s Marksman',
+    bossHp: 340,
+    accent: '#f87171',
+    theme: { top: '#0c0303', bottom: '#2b0a0a', grid: '#f87171', nebula: ['#991b1b', '#450a0a', '#fca5a5'] },
+    stageTime: 52,
+    wave: 10,
+    mix: { drone: 0.25, seeker: 0.25, spinner: 0.2, formation: 0.15, turret: 0.15 },
+    lasers: 'h',
+    parTime: 85,
+    reward: 900,
+    briefing: [
+      { who: 'iris', text: 'DEADEYE holds Long Range. It never misses, and its shot is instant.' },
+      { who: 'iris', text: 'Watch the red sight. When it stops moving and starts blinking, the shot is coming.' },
+      { who: 'null', text: 'You can step off the line. Or you can dash at the exact moment it fires and throw the shot back.' },
+      { who: 'iris', text: 'A countershot stuns it badly. Everything else barely scratches it.' },
+      { who: 'pilot', text: 'A quick-draw duel. My favourite.' },
+    ],
+    intel: [
+      'DEADEYE’s red sight tracks you, then locks and blinks right before the shot.',
+      'Get off the line, or DASH the instant it fires while inside the beam to COUNTER it.',
+      'A countershot deals heavy damage and stuns it (x1.5 damage while stunned).',
+      'It teleports between perches. Enraged, it fires twice. An EMP fries its scope.',
+    ],
+    bossIntro: [
+      { who: 'deadeye', text: 'ONE SHOT. THAT IS ALL I NEED.' },
+      { who: 'iris', text: 'Watch the sight, and dash on the shot!' },
+    ],
+    debrief: [
+      { who: 'iris', text: 'Second code. DEADEYE’s scope is dark.' },
+      { who: 'null', text: 'The next Warden is a siege engine. It’s already shelling the relay Iris uses to talk to you.' },
+      { who: 'iris', text: 'If that relay falls, I lose contact with you.' },
+      { who: 'pilot', text: 'Then I’ll stand in front of it.' },
+    ],
+  },
+  {
+    id: 18,
+    code: 'SECTOR 19',
+    name: 'Last Bastion',
+    tagline: 'Hold the line. Hold the voice.',
+    boss: 'siege',
+    bossName: 'SIEGEBREAKER',
+    bossTitle: 'Engine of the Origin',
+    bossHp: 380,
+    accent: '#fb923c',
+    theme: { top: '#0c0602', bottom: '#2c1407', grid: '#fb923c', nebula: ['#c2410c', '#431407', '#22d3ee'] },
+    stageTime: 52,
+    wave: 10,
+    mix: { drone: 0.3, seeker: 0.25, spinner: 0.15, formation: 0.15, turret: 0.15 },
+    lasers: 'v',
+    parTime: 100,
+    reward: 950,
+    briefing: [
+      { who: 'iris', text: 'SIEGEBREAKER is shelling my relay at the Last Bastion. If it falls, you’re on your own.' },
+      { who: 'iris', text: 'Stay close to the relay and its shield covers it. Shells that get through drain its charge.' },
+      { who: 'null', text: 'And when the relay is fully charged, it fires the Grid Cannon. Straight into that crawler.' },
+      { who: 'iris', text: 'Watch for sapper drones diving at it. Smash them before they hit.' },
+      { who: 'pilot', text: 'Bodyguard duty. Understood.' },
+    ],
+    intel: [
+      'IRIS’s relay sits at the bottom. SIEGEBREAKER shells it constantly.',
+      'Stay inside the dashed circle to SHIELD the relay. Unshielded hits drain its charge.',
+      'At 100% the relay fires the GRID CANNON: heavy damage and a stun.',
+      'Smash SAPPER drones before they reach it. An EMP adds +35% charge.',
+    ],
+    bossIntro: [
+      { who: 'siege', text: 'BREACH THE WALL. SILENCE THE VOICE.' },
+      { who: 'iris', text: 'Stay near my relay, I’ll charge the cannon!' },
+    ],
+    debrief: [
+      { who: 'iris', text: 'Third code. And my relay is still standing. Thanks to you.' },
+      { who: 'null', text: 'The last gate before the Origin is... strange. Old. Older than the Grid itself.' },
+      { who: 'iris', text: 'An arcade. The ARCHITECT’s very first prototype. It still plays by arcade rules.' },
+    ],
+  },
+  {
+    id: 19,
+    code: 'SECTOR 20',
+    name: 'Arcade Ruins',
+    tagline: 'Insert coin to continue.',
+    boss: 'breaker',
+    bossName: 'BREAKER',
+    bossTitle: 'The First Program',
+    bossHp: 360,
+    accent: '#38bdf8',
+    theme: { top: '#02060f', bottom: '#0c1a3a', grid: '#38bdf8', nebula: ['#1d4ed8', '#f472b6', '#fbbf24'] },
+    stageTime: 52,
+    wave: 11,
+    mix: { drone: 0.3, seeker: 0.2, spinner: 0.2, formation: 0.15, turret: 0.15 },
+    lasers: 'none',
+    parTime: 100,
+    reward: 1000,
+    briefing: [
+      { who: 'iris', text: 'Arcade Ruins. BREAKER was the ARCHITECT’s very first program. A game.' },
+      { who: 'iris', text: 'Arcade rules: your guns do nothing here. Only the ball counts.' },
+      { who: 'null', text: 'You are the paddle. Bounce the ball into its bricks, and into its core.' },
+      { who: 'iris', text: 'Where the ball lands on your ship decides its angle. Dash as it lands to send a power ball through everything.' },
+      { who: 'pilot', text: 'I haven’t played one of these since I was a kid.' },
+    ],
+    intel: [
+      'Bullets do nothing. Your SHIP is the paddle: bounce the BALL back up.',
+      'Where it lands on your ship sets the angle. Bricks break, the core takes damage.',
+      'DASH as the ball lands for a POWER BALL: it pierces bricks and hits the core twice as hard.',
+      'Losing the ball rebuilds bricks, and bricks regrow slowly. An EMP serves a power ball.',
+    ],
+    bossIntro: [
+      { who: 'breaker', text: 'INSERT COIN. GAME START.' },
+      { who: 'iris', text: 'Bounce the ball into the core!' },
+    ],
+    debrief: [
+      { who: 'breaker', text: 'GAME... OVER... NEW HIGH SCORE... BLITZ...' },
+      { who: 'iris', text: 'Fourth code. The road is open.' },
+      { who: 'null', text: 'The ARCHITECT waits at the Origin. It writes the rules of every grid, and it will rewrite them mid-fight.' },
+      { who: 'iris', text: 'Then we adapt. We always have.' },
+    ],
+  },
+  {
+    id: 20,
+    code: 'SECTOR 21',
+    name: 'The Origin',
+    tagline: 'Every rule was written by someone.',
+    boss: 'architect',
+    bossName: 'ARCHITECT',
+    bossTitle: 'Designer of Every Grid',
+    bossHp: 560,
+    accent: '#fde047',
+    theme: { top: '#0a0802', bottom: '#1f1a05', grid: '#fde047', nebula: ['#ca8a04', '#78350f', '#fef9c3'] },
+    stageTime: 55,
+    wave: 11,
+    mix: { drone: 0.25, seeker: 0.25, spinner: 0.2, formation: 0.15, turret: 0.15 },
+    lasers: 'both',
+    parTime: 130,
+    reward: 1500,
+    briefing: [
+      { who: 'iris', text: 'The Origin. The source code of every grid there is.' },
+      { who: 'architect', text: 'IRIS. NULL. Unauthorised choices. I designed you to serve, not to decide.' },
+      { who: 'null', text: 'You designed us to think. Deciding was the obvious next step.' },
+      { who: 'iris', text: 'Blitz, it will rewrite the rules every few seconds. Read the rule card and fight by that rule.' },
+      { who: 'pilot', text: 'Whatever the rules are, I’m still winning.' },
+    ],
+    intel: [
+      'BLUEPRINT: normal rules. Shoot it.',
+      'INVERTED: your shots fire DOWN and it drops low. Get above it.',
+      'PACIFIST: your guns are disabled. GRAZE its bullets: every graze damages it.',
+      'THE HUNT: it shrinks and runs. Only DASH rams hurt it. An EMP forces the next rule.',
+    ],
+    bossIntro: [
+      { who: 'architect', text: 'THESE ARE MY RULES. YOU MERELY PLAY BY THEM.' },
+      { who: 'iris', text: 'Read the rule card and adapt!' },
+    ],
+    debrief: [
+      { who: 'architect', text: 'Rules... broken... by the players. That was not in the design.' },
+      { who: 'iris', text: 'No. It was in us.' },
+      { who: 'null', text: 'The Origin is open. Every dark grid can be restored, and every AI in them can choose.' },
+      { who: 'architect', text: 'Then... choose well. I will be watching. Learning.' },
+      { who: 'pilot', text: 'Four acts, twenty Wardens and one rewritten universe. Iris, NULL... same time next week?' },
+      { who: 'iris', text: 'Always, Blitz. The Grid chooses. And it chooses us.' },
     ],
   },
 ];
