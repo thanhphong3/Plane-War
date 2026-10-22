@@ -1,5 +1,5 @@
 import { SaveData } from '../types/game';
-import { DEFAULT_SETTINGS, INITIAL_SAVE, STORAGE_KEY } from './constants';
+import { BOSS_RUSH_ORDER, DEFAULT_SETTINGS, INITIAL_SAVE, STORAGE_KEY } from './constants';
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -57,7 +57,10 @@ export function loadGameSave(): SaveData {
       campaignUnlocked: typeof parsed.campaignUnlocked === 'number' ? parsed.campaignUnlocked : 0,
       campaignStars: Array.isArray(parsed.campaignStars) ? parsed.campaignStars : [],
       bestBossRush: typeof parsed.bestBossRush === 'number' ? parsed.bestBossRush : 0,
-      bestBossRushTime: typeof parsed.bestBossRushTime === 'number' ? parsed.bestBossRushTime : 0,
+      // A time set on a shorter roster can't be compared with today's gauntlet
+      bestBossRushTime:
+        typeof parsed.bestBossRushTime === 'number' && parsed.bossRushRoster === BOSS_RUSH_ORDER.length ? parsed.bestBossRushTime : 0,
+      bossRushRoster: BOSS_RUSH_ORDER.length,
       dailyQuests:
         isObj(parsed.dailyQuests) &&
         isArr3(parsed.dailyQuests.ids) &&

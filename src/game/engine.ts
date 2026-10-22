@@ -109,7 +109,7 @@ export function createEngineState() {
     // Boss Rush: index of the boss being fought (or next up), intermission countdown
     bossRushIndex: -1,
     bossRushTimer: 0,
-    /** All seven bosses are down: victory lap before the results screen. */
+    /** Every boss in the Rush is down: victory lap before the results screen. */
     bossRushWon: false,
 
     // Tactical Perks

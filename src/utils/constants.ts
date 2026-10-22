@@ -291,7 +291,8 @@ export const PERK_TUNING = {
 };
 
 /** Boss Rush gauntlet, easiest to hardest. Endless cycles through the same list. */
-export const BOSS_RUSH_ORDER: BossKind[] = ['sentinel', 'gatekeeper', 'twins', 'furnace', 'wraith', 'singularity', 'null'];
+/** Boss Rush roster and the Endless rotation: the Sentinel, then every campaign Warden in story order. */
+export const BOSS_RUSH_ORDER: BossKind[] = ['sentinel', ...LEVELS.map((l) => l.boss)];
 
 /** Combo milestones that pay out a bonus (see bumpCombo). */
 export const COMBO_MILESTONES = [10, 20, 30];
@@ -477,7 +478,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   {
     id: 'boss_rush_clear',
     title: 'Gauntlet Breaker',
-    desc: 'Clear Boss Rush: defeat all 7 bosses in one run.',
+    desc: `Clear Boss Rush: defeat all ${BOSS_RUSH_ORDER.length} bosses in one run.`,
     icon: 'crown',
     rewardShards: 400,
     isEligible: (s) => s.bestBossRushTime > 0,
@@ -583,6 +584,7 @@ export const INITIAL_SAVE: SaveData = {
   bestHardcore: 0,
   bestBossRush: 0,
   bestBossRushTime: 0,
+  bossRushRoster: BOSS_RUSH_ORDER.length,
   bestCombo: 1,
   bestFeverInRun: 0,
   totalRuns: 0,

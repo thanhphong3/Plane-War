@@ -172,6 +172,8 @@ export interface SaveData {
   bestBossRush: number;
   /** Fastest full Boss Rush clear in seconds (0 = never cleared). */
   bestBossRushTime: number;
+  /** Roster size the fastest time was set with (a longer roster resets it). */
+  bossRushRoster: number;
   bestCombo: number;
   bestFeverInRun: number;
   totalRuns: number;

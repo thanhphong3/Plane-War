@@ -78,6 +78,8 @@ export interface BossBehavior {
   graze?(b: BossEntity, api: BossApi, amount: number): void;
   /** The player picked up a Root Key. */
   key?(b: BossEntity, api: BossApi): void;
+  /** Arcade time ran out and it is leaving: undo anything that only its update keeps in check. */
+  retreat?(b: BossEntity, api: BossApi): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -1932,6 +1934,16 @@ const chronos: BossBehavior = {
   emp(b, api) {
     if (b.parts[0]?.alive) chronosBreak(b, api);
     else b.v.stopped = Math.max(b.v.stopped, 2.5);
+  },
+  retreat(b, api) {
+    // Nothing will un-freeze a Time Stop once it's gone: let those shots fall away
+    for (const h of api.hazards) {
+      if (!frozenShots.has(h)) continue;
+      frozenShots.delete(h);
+      h.vy = 150;
+    }
+    b.v.ts = 0;
+    b.v.tsWarn = 0;
   },
 };
 

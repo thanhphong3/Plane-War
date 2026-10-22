@@ -31,6 +31,7 @@ import { localLevel, localModifier, localShip, questLabel } from '../i18n/conten
 import { useEscape } from '../hooks/useEscape';
 import { GameMode, SaveData, ShipDef } from '../types/game';
 import {
+  BOSS_RUSH_ORDER,
   DAILY_MODIFIERS,
   DAILY_QUEST_BONUS,
   SHIPS,
@@ -76,7 +77,7 @@ const MODES: {
   {
     id: 'bossrush',
     name: () => tr('Boss Rush', 'Boss Rush'),
-    tag: () => tr('7 bosses in a row', '7 boss liên hoàn'),
+    tag: () => tr(`${BOSS_RUSH_ORDER.length} bosses in a row`, `${BOSS_RUSH_ORDER.length} boss liên hoàn`),
     Icon: Crown,
     accent: 'rose',
     best: (s) => s.bestBossRush,

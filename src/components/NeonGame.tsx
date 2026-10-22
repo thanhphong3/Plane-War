@@ -926,7 +926,8 @@ export const NeonGame: React.FC = () => {
       const tier = def ? def.id + 1 + loop * 3 : rush ? 2 : arcade ? 1 + loop * 3 : e.bossCount;
       const hard = gameModeRef.current === 'hardcore';
       // Each lap of the arcade rotation brings tougher Wardens
-      const arcadeHp = arcade ? (0.85 + loop * 0.35) * (hard ? 1.25 : 1) : 1;
+      // The Rush is a long one-life gauntlet, so its Wardens come in a little lighter than in the campaign
+      const arcadeHp = arcade ? (0.85 + loop * 0.35) * (hard ? 1.25 : 1) : rush ? 0.8 : 1;
       const maxHp = def ? Math.round(def.bossHp * arcadeHp) : Math.round((60 + tier * 35) * (hard ? 1.3 : 1));
       const b: BossEntity = {
         kind,
@@ -944,7 +945,8 @@ export const NeonGame: React.FC = () => {
         attackIndex: 0,
         hitFlash: 0,
         // Arcade bosses retreat if they're not beaten in time; campaign and Rush bosses fight to the end
-        timeLeft: !arcade ? Infinity : kind === 'sentinel' ? 38 : kind === 'null' ? 90 : 60,
+        // Act finales (NULL, LEVIATHAN, FRACTAL, ARCHITECT) get longer before they retreat
+        timeLeft: !arcade ? Infinity : kind === 'sentinel' ? 38 : src && isActFinale(src.id) ? 90 : 60,
         level: tier,
         entered: false,
         phase: 1,
@@ -1374,7 +1376,7 @@ export const NeonGame: React.FC = () => {
       updateSave({
         ...withRunTotals(cur, e, getActiveShip().id),
         ...(campaign || isDaily ? {} : { [bestKey]: Math.max(previousBest, finalScore) }),
-        ...(newBestTime ? { bestBossRushTime: clearTime } : {}),
+        ...(newBestTime ? { bestBossRushTime: clearTime, bossRushRoster: BOSS_RUSH_ORDER.length } : {}),
         ...(isDaily && sameDay ? { daily: { ...today, best: Math.max(today.best, finalScore), rewarded: true } } : {}),
         totalRuns: cur.totalRuns + 1,
         shards: cur.shards + e.runShardsEarned,
@@ -1790,7 +1792,7 @@ export const NeonGame: React.FC = () => {
         : timed
         ? tr('60 SECOND BLITZ — GO GO GO!', 'TỐC CHIẾN 60 GIÂY — LÊN NÀO!')
         : rush
-        ? tr('BOSS RUSH — 7 BOSSES, ONE LIFE', 'BOSS RUSH — 7 BOSS, MỘT MẠNG')
+        ? tr(`BOSS RUSH — ${BOSS_RUSH_ORDER.length} BOSSES, ONE LIFE`, `BOSS RUSH — ${BOSS_RUSH_ORDER.length} BOSS, MỘT MẠNG`)
         : mode === 'hardcore'
         ? tr('HARDCORE — x2 SHARDS!', 'CỰC HẠN — x2 MẢNH!')
         : tr('DRAG TO FLY • DOUBLE-TAP TO DASH', 'KÉO ĐỂ BAY • CHẠM ĐÚP ĐỂ LƯỚT'),
@@ -2941,7 +2943,10 @@ export const NeonGame: React.FC = () => {
         } else {
           if (alive && Number.isFinite(boss.timeLeft)) {
             boss.timeLeft -= rawDt;
-            if (boss.timeLeft <= 0) showCenterBanner(tr(`${boss.name} RETREATED`, `${boss.name} ĐÃ RÚT LUI`), 'neon-glow-pink');
+            if (boss.timeLeft <= 0) {
+              behavior.retreat?.(boss, api);
+              showCenterBanner(tr(`${boss.name} RETREATED`, `${boss.name} ĐÃ RÚT LUI`), 'neon-glow-pink');
+            }
           }
           behavior.update(boss, api, worldDt, true);
         }

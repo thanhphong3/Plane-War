@@ -1,5 +1,6 @@
 import { DialogueLine, LevelDef } from '../game/campaign';
 import { AchievementDef, DailyModifierDef, PerkDef, QuestDef, ShipDef, UpgradeDef } from '../types/game';
+import { BOSS_RUSH_ORDER } from '../utils/constants';
 import { getLang } from './index';
 
 // ---------------------------------------------------------------------------
@@ -91,7 +92,7 @@ const ACHIEVEMENTS_VI: Record<string, { title: string; desc: string }> = {
   shard_collector: { title: 'Đại Gia Mảnh', desc: 'Sở hữu cùng lúc 1.000 Mảnh Neon.' },
   score_legend: { title: 'Huyền Thoại 10K', desc: 'Đạt 10.000 điểm trở lên ở bất kỳ chế độ nào.' },
   boss_hunter: { title: 'Kẻ Phá Lõi', desc: 'Tiêu diệt tổng cộng 5 boss.' },
-  boss_rush_clear: { title: 'Phá Đảo Liên Hoàn', desc: 'Vượt qua Boss Rush: hạ cả 7 boss trong một lượt.' },
+  boss_rush_clear: { title: 'Phá Đảo Liên Hoàn', desc: `Vượt qua Boss Rush: hạ cả ${BOSS_RUSH_ORDER.length} boss trong một lượt.` },
   campaign_half: { title: 'Nửa Chặng Đường', desc: 'Vượt qua Khu Vực 03 của chiến dịch Gridfall.' },
   campaign_clear: { title: 'Lưới Đã Hồi Sinh', desc: 'Đánh bại NULL và hoàn thành chiến dịch Gridfall.' },
   campaign_perfect: { title: 'Phi Công Hoàn Hảo', desc: 'Đạt 3 sao ở mọi khu vực của chiến dịch.' },

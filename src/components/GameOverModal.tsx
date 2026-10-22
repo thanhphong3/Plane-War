@@ -336,7 +336,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         {rush && (
           <p className="text-xs text-slate-400 mt-1">
             {stats.reason === 'victory'
-              ? tr('All 7 bosses down. +250 shard bounty!', 'Hạ cả 7 boss. Thưởng +250 mảnh!')
+              ? tr(`All ${rush.total} bosses down. +250 shard bounty!`, `Hạ cả ${rush.total} boss. Thưởng +250 mảnh!`)
               : tr(`Fell at boss ${Math.min(rush.total, rush.cleared + 1)}/${rush.total}`, `Gục ngã ở boss ${Math.min(rush.total, rush.cleared + 1)}/${rush.total}`)}
             {rush.bestTime > 0 && ` • ${tr('Best', 'Kỷ lục')} ${formatRunTime(rush.bestTime)}`}
           </p>
